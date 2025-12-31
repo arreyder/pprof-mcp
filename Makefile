@@ -27,16 +27,14 @@ install-profctl:
 	GOFLAGS='$(GOFLAGS)' go install ./cmd/profctl
 
 config:
-	@cat <<'EOF'
-{
-  "mcpServers": {
-    "pprof-mcp": {
-      "command": "bash",
-      "args": ["-lc", "cd /home/arreyder/repos/pprof-mcp && go run ./cmd/pprof-mcp-server"]
-    }
-  }
-}
-EOF
+	@printf '%s\n' '{' \
+	  '  "mcpServers": {' \
+	  '    "pprof-mcp": {' \
+	  '      "command": "bash",' \
+	  '      "args": ["-lc", "cd /home/arreyder/repos/pprof-mcp && go run ./cmd/pprof-mcp-server"]' \
+	  '    }' \
+	  '  }' \
+	  '}'
 
 clean:
 	rm -rf bin
