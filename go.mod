@@ -2,6 +2,8 @@ module github.com/arreyder/pprof-mcp
 
 go 1.25.5
 
+replace github.com/conductorone/mcp-go-sdk => ./pkg/mcp-go-sdk
+
 require (
 	github.com/conductorone/mcp-go-sdk v0.0.2-0.20250409052025-bb025f7b7af9
 	github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6

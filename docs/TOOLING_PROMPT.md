@@ -37,11 +37,16 @@ If `profctl` is not on your PATH, run it via `go run ./cmd/profctl`.
 ### pprof analysis tools
 - `pprof.top` -> `profctl pprof top --profile <pprof> [--cum] [--nodecount N] [--focus REGEX] [--ignore REGEX] [--sample_index <index>]`
 - `pprof.peek` -> `profctl pprof peek --profile <pprof> --regex <func_or_regex>`
-- `pprof.list` -> `profctl pprof list --profile <pprof> --function <func_or_regex> --repo_root <repo_root> --trim_path /xsrc`
+- `pprof.list` -> `profctl pprof list --profile <pprof> --function <func_or_regex> --repo_root <repo_root> --trim_path /xsrc [--source_paths <paths>]`
 - `pprof.traces_head` -> `profctl pprof traces_head --profile <pprof> --lines <N>`
 - `pprof.diff_top` -> `profctl pprof diff_top --before <pprof> --after <pprof> [--cum] [--nodecount N] [--focus REGEX] [--ignore REGEX] [--sample_index <index>]`
 - `pprof.meta` -> `profctl pprof meta --profile <pprof> --json`
 - `pprof.storylines` -> `profctl pprof storylines --profile <cpu.pprof> --n <2-6> --repo_prefix <prefix> --repo_root <repo_root> --json`
+- `pprof.tags` -> Filter/show profile labels (tenant_id, connector_id, etc). Use `--tag_show <key>` to list values, or `--tag_focus`/`--tag_ignore` to filter.
+- `pprof.flamegraph` -> Generate SVG flamegraph: `--profile <pprof> --output_path <file.svg> [--focus REGEX] [--tag_focus REGEX]`
+- `pprof.callgraph` -> Generate call graph: `--profile <pprof> --output_path <file> --format <dot|svg|png> [--focus REGEX] [--nodecount N]`
+- `pprof.focus_paths` -> Show all call paths to a function: `--profile <pprof> --function <func_or_regex> [--cum] [--nodecount N]`
+- `pprof.merge` -> Merge multiple profiles: `--profiles <path1,path2,...> --output_path <merged.pprof>`
 
 ========================================================
 ## PASS 1 - EVIDENCE PACK (No opinions yet)

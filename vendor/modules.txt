@@ -1,5 +1,5 @@
-# github.com/conductorone/mcp-go-sdk v0.0.2-0.20250409052025-bb025f7b7af9
-## explicit; go 1.24.1
+# github.com/conductorone/mcp-go-sdk v0.0.2-0.20250409052025-bb025f7b7af9 => ./pkg/mcp-go-sdk
+## explicit; go 1.25.5
 github.com/conductorone/mcp-go-sdk/mcp/schema
 github.com/conductorone/mcp-go-sdk/mcp/server
 github.com/conductorone/mcp-go-sdk/mcp/server/transport
@@ -30,3 +30,4 @@ github.com/veqryn/slog-context/internal/attr
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# github.com/conductorone/mcp-go-sdk => ./pkg/mcp-go-sdk
