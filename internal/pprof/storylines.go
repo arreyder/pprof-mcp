@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/pprof/profile"
 
-	"gofast-mcp/internal/pprofparse"
+	"github.com/arreyder/pprof-mcp/internal/pprofparse"
 )
 
 type StorylinesParams struct {

@@ -11,14 +11,14 @@ import (
 
 	"github.com/conductorone/mcp-go-sdk/mcp/server"
 
-	"gofast-mcp/internal/datadog"
-	"gofast-mcp/internal/pprof"
-	"gofast-mcp/internal/services"
+	"github.com/arreyder/pprof-mcp/internal/datadog"
+	"github.com/arreyder/pprof-mcp/internal/pprof"
+	"github.com/arreyder/pprof-mcp/internal/services"
 )
 
 func main() {
-	s := server.NewMCPServer("gofast-mcp",
-		server.WithName("Go Fast Profiling MCP"),
+	s := server.NewMCPServer("pprof-mcp",
+		server.WithName("pprof MCP"),
 		server.WithVersion("0.1.0"),
 		server.WithInstructions("Profiling tools for Datadog profile download and deterministic pprof analysis."),
 		server.WithTool("profiles.download_latest_bundle", downloadTool),
@@ -34,7 +34,7 @@ func main() {
 		server.WithTool("repo.services.discover", repoServicesTool),
 	)
 
-	log.Println("Starting Go Fast MCP server over stdio")
+	log.Println("Starting pprof MCP server over stdio")
 	if err := s.ServeStdio(context.Background()); err != nil {
 		log.Fatalf("Error serving MCP: %v", err)
 		os.Exit(1)

@@ -1,4 +1,4 @@
-module gofast-mcp
+module github.com/arreyder/pprof-mcp
 
 go 1.25.5
 

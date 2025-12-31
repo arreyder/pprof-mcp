@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gofast-mcp/internal/pprofparse"
+	"github.com/arreyder/pprof-mcp/internal/pprofparse"
 )
 
 type TopParams struct {

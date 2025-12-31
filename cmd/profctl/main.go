@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"gofast-mcp/internal/datadog"
-	"gofast-mcp/internal/pprof"
-	"gofast-mcp/internal/services"
+	"github.com/arreyder/pprof-mcp/internal/datadog"
+	"github.com/arreyder/pprof-mcp/internal/pprof"
+	"github.com/arreyder/pprof-mcp/internal/services"
 )
 
 type jsonOutput map[string]any
