@@ -119,8 +119,17 @@ func ToolSchemas() []ToolDefinition {
 	return []ToolDefinition{
 		{
 			Schema: schema.Tool{
-				Name:        "profiles.download_latest_bundle",
-				Description: "Download the latest profiling bundle from Datadog for a service. Returns paths to downloaded pprof files.",
+				Name: "profiles.download_latest_bundle",
+				Description: `Download profiling bundle from Datadog for a service.
+
+**When to use**: Start here to get profiles for analysis. Downloads CPU, heap, mutex, and goroutine profiles.
+
+**Workflow**:
+1. Use datadog.profiles.list to see available profiles
+2. Use datadog.profiles.pick to select a specific profile (by time, strategy, etc.)
+3. Use this tool with the profile_id and event_id to download
+
+**Returns**: Paths to downloaded .pprof files for use with other pprof.* tools.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -129,8 +138,8 @@ func ToolSchemas() []ToolDefinition {
 						"out_dir":    prop("string", "Output directory for downloaded profiles (required)"),
 						"hours":      prop("integer", "Number of hours to look back for profiles (default: 72)"),
 						"dd_site":    prop("string", "Datadog site (e.g., datadoghq.com, datadoghq.eu)"),
-						"profile_id": prop("string", "Specific profile ID to download"),
-						"event_id":   prop("string", "Specific event ID to download"),
+						"profile_id": prop("string", "Specific profile ID to download (use with event_id)"),
+						"event_id":   prop("string", "Specific event ID to download (required if profile_id is set)"),
 					},
 					Required: []string{"service", "env", "out_dir"},
 				},
@@ -139,8 +148,18 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.top",
-				Description: "Run pprof top command to show the top functions by CPU/memory usage. Returns structured data with function names, flat/cumulative values, and percentages.",
+				Name: "pprof.top",
+				Description: `Show top functions by CPU/memory usage from a pprof profile.
+
+**When to use**: First tool to run after downloading profiles. Identifies which functions consume the most resources.
+
+**Key options**:
+- cum=true: Sort by cumulative time (time spent in function + all functions it calls)
+- cum=false (default): Sort by flat time (time spent only in the function itself)
+- sample_index: Use 'alloc_space' for heap profiles, 'delay' for mutex/block profiles
+- focus: Filter to functions matching regex (e.g., "mypackage")
+
+**Returns**: Structured data with function names, flat/cumulative values, and percentages.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -159,8 +178,14 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.peek",
-				Description: "Run pprof peek command to show callers and callees of functions matching a regex pattern.",
+				Name: "pprof.peek",
+				Description: `Show callers and callees of functions matching a pattern.
+
+**When to use**: After identifying a hot function with pprof.top, use this to understand:
+- Who calls this function (callers)
+- What functions it calls (callees)
+
+**Example**: If pprof.top shows "json.Unmarshal" is hot, use peek to see which of YOUR functions call it.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -175,8 +200,14 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.list",
-				Description: "Run pprof list command to show annotated source code for a function with line-level profiling data.",
+				Name: "pprof.list",
+				Description: `Show annotated source code with line-level profiling data.
+
+**When to use**: After identifying a hot function, use this to see exactly which LINES are expensive.
+
+**Requirements**: Source code must be available. Use repo_root to specify where sources are located.
+
+**Example output**: Shows each line with CPU time, helping pinpoint the exact bottleneck.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -184,7 +215,7 @@ func ToolSchemas() []ToolDefinition {
 						"binary":       prop("string", "Path to the binary for symbol resolution"),
 						"function":     prop("string", "Function name or regex to list source for (required)"),
 						"repo_root":    prop("string", "Repository root path for source file resolution"),
-						"trim_path":    prop("string", "Path prefix to trim from source file paths"),
+						"trim_path":    prop("string", "Path prefix to trim from source file paths (default: /xsrc)"),
 						"source_paths": arrayProp("string", "Additional source paths for vendored or external dependencies"),
 					},
 					Required: []string{"profile", "function"},
@@ -194,8 +225,12 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.traces_head",
-				Description: "Run pprof traces command and return the first N lines of stack traces.",
+				Name: "pprof.traces_head",
+				Description: `Show stack traces from a profile.
+
+**When to use**: To see the actual call stacks that were sampled. Useful for understanding the full execution context.
+
+**Note**: Output can be large; use 'lines' parameter to limit.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -210,8 +245,20 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.diff_top",
-				Description: "Compare two pprof profiles and show the difference in top functions. Useful for identifying performance regressions or improvements.",
+				Name: "pprof.diff_top",
+				Description: `Compare two profiles to identify performance changes.
+
+**When to use**:
+- Before/after optimization comparisons
+- Identifying regressions between releases
+- Comparing different time periods
+
+**Workflow**:
+1. Download baseline profile (e.g., before fix) with profiles.download_latest_bundle
+2. Download comparison profile (e.g., after fix)
+3. Use this tool with 'before' and 'after' paths
+
+**Returns**: Delta showing which functions improved/regressed and by how much.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -232,7 +279,7 @@ func ToolSchemas() []ToolDefinition {
 		{
 			Schema: schema.Tool{
 				Name:        "pprof.meta",
-				Description: "Extract metadata from a pprof profile including sample types, duration, drop frames, and comments.",
+				Description: "Extract metadata from a pprof profile including sample types, duration, drop frames, and comments. Useful for understanding what data is available in a profile.",
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -245,8 +292,16 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.storylines",
-				Description: "Analyze profile to find the top N 'storylines' - hot code paths in your repository. Shows the most expensive execution paths with source-level detail.",
+				Name: "pprof.storylines",
+				Description: `Find the top N hot code paths ("storylines") in your repository.
+
+**When to use**: To get a high-level view of where time is spent in YOUR code (not library code).
+
+**Key options**:
+- repo_prefix: Identifies your code (e.g., "github.com/myorg/myrepo")
+- n: Number of storylines to return (default: 4)
+
+**Returns**: The most expensive execution paths with source-level detail, filtered to your repository code.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -265,14 +320,24 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "datadog.profiles.list",
-				Description: "List available profiling data from Datadog for a service. Returns profile metadata including timestamps and IDs.",
+				Name: "datadog.profiles.list",
+				Description: `List available profiles from Datadog for a service.
+
+**When to use**: To see what profiles are available before downloading. Shows timestamps and IDs.
+
+**Time parameters**:
+- hours: Look back N hours from now (default: 72)
+- from/to: Specific time range. Supports:
+  - Relative: "-3h", "-24h", "-30m"
+  - Absolute: "2025-01-15T10:00:00Z" (RFC3339)
+
+**Returns**: List of profile candidates with timestamps, profile_id, and event_id.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
 						"service": prop("string", "The service name to list profiles for (required)"),
 						"env":     prop("string", "The environment (e.g., prod, staging) (required)"),
-						"from":    prop("string", "Start time (RFC3339 or relative like '-1h')"),
+						"from":    prop("string", "Start time (RFC3339 or relative like '-1h', '-24h')"),
 						"to":      prop("string", "End time (RFC3339 or relative)"),
 						"hours":   prop("integer", "Number of hours to look back (default: 72, ignored if from/to set)"),
 						"limit":   prop("integer", "Maximum number of profiles to return (default: 50)"),
@@ -285,21 +350,33 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "datadog.profiles.pick",
-				Description: "Pick a specific profile from Datadog based on a selection strategy. Useful for selecting profiles at specific times or with specific characteristics.",
+				Name: "datadog.profiles.pick",
+				Description: `Select a specific profile using a selection strategy.
+
+**Strategies**:
+- latest (default): Most recent profile
+- oldest: Oldest profile in range (useful for before/after comparisons)
+- closest: Profile closest to target_ts (requires target_ts parameter)
+- index: Specific index from list (requires index parameter, 0-based)
+
+**Workflow for before/after comparison**:
+1. Pick oldest profile: strategy="oldest" for the baseline
+2. Pick latest profile: strategy="latest" for current state
+3. Download both with profiles.download_latest_bundle
+4. Compare with pprof.diff_top`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
 						"service":   prop("string", "The service name (required)"),
 						"env":       prop("string", "The environment (required)"),
-						"from":      prop("string", "Start time (RFC3339 or relative)"),
+						"from":      prop("string", "Start time (RFC3339 or relative like '-3h')"),
 						"to":        prop("string", "End time (RFC3339 or relative)"),
 						"hours":     prop("integer", "Number of hours to look back (default: 72)"),
 						"limit":     prop("integer", "Maximum profiles to consider (default: 50)"),
 						"site":      prop("string", "Datadog site"),
-						"strategy":  enumProp("string", "Selection strategy", []string{"latest", "oldest", "closest", "index"}),
+						"strategy":  enumProp("string", "Selection strategy: latest (default), oldest, closest (needs target_ts), index (needs index)", []string{"latest", "oldest", "closest", "index"}),
 						"target_ts": prop("string", "Target timestamp for 'closest' strategy (RFC3339)"),
-						"index":     prop("integer", "Index for 'index' strategy (0-based)"),
+						"index":     prop("integer", "Index for 'index' strategy (0-based from list results)"),
 					},
 					Required: []string{"service", "env"},
 				},
@@ -309,7 +386,7 @@ func ToolSchemas() []ToolDefinition {
 		{
 			Schema: schema.Tool{
 				Name:        "repo.services.discover",
-				Description: "Discover services in a repository by scanning for common patterns like Dockerfiles, go.mod, package.json, etc.",
+				Description: "Discover services in a repository by scanning for common patterns like Dockerfiles, go.mod, package.json, etc. Useful for finding service names to use with Datadog profiling.",
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -322,16 +399,22 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.tags",
-				Description: "Show or filter profile data by tags/labels. Can list available tags or filter results by tag values (e.g., tenant_id, connector_id).",
+				Name: "pprof.tags",
+				Description: `Filter or group profile data by tags/labels.
+
+**When to use**: Profiles often include labels like tenant_id, connector_id, etc. Use this to:
+- See what tags are available (tag_show parameter)
+- Filter to specific tag values (tag_focus/tag_ignore)
+
+**Example**: Filter CPU profile to a specific tenant: tag_focus="tenant_id:abc123"`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
 						"profile":      prop("string", "Path to the pprof profile file (required)"),
 						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"tag_focus":    prop("string", "Regex to focus on samples with matching tag values"),
+						"tag_focus":    prop("string", "Regex to focus on samples with matching tag values (e.g., 'tenant_id:abc')"),
 						"tag_ignore":   prop("string", "Regex to ignore samples with matching tag values"),
-						"tag_show":     prop("string", "Show values for a specific tag key (runs -tags mode)"),
+						"tag_show":     prop("string", "Show values for a specific tag key (e.g., 'tenant_id' to list all tenants)"),
 						"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
 						"nodecount":    prop("integer", "Maximum number of nodes to show"),
 						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
@@ -343,8 +426,12 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.flamegraph",
-				Description: "Generate a flamegraph SVG visualization from a pprof profile. Useful for visualizing hot code paths.",
+				Name: "pprof.flamegraph",
+				Description: `Generate a flamegraph SVG visualization from a profile.
+
+**When to use**: For visual exploration of where time is spent. Flamegraphs show the full call stack with width proportional to time spent.
+
+**Output**: SVG file that can be opened in a browser for interactive exploration.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -364,15 +451,22 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.callgraph",
-				Description: "Generate a call graph visualization from a pprof profile in DOT, SVG, or PNG format.",
+				Name: "pprof.callgraph",
+				Description: `Generate a call graph visualization showing function relationships.
+
+**When to use**: To visualize how functions call each other and where time flows.
+
+**Formats**:
+- dot: GraphViz DOT format (can be rendered with graphviz)
+- svg: Direct SVG visualization
+- png: PNG image`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
 						"profile":      prop("string", "Path to the pprof profile file (required)"),
 						"output_path":  prop("string", "Path to write the output file (required)"),
 						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"format":       enumProp("string", "Output format", []string{"dot", "svg", "png"}),
+						"format":       enumProp("string", "Output format: dot, svg, or png (default: dot)", []string{"dot", "svg", "png"}),
 						"focus":        prop("string", "Regex to focus on specific functions"),
 						"ignore":       prop("string", "Regex to ignore specific functions"),
 						"nodecount":    prop("integer", "Maximum number of nodes to show"),
@@ -387,8 +481,12 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.focus_paths",
-				Description: "Show all call paths that lead to a specific function. Useful for understanding how a hot function is reached.",
+				Name: "pprof.focus_paths",
+				Description: `Show all call paths that lead to a specific function.
+
+**When to use**: When you know a function is hot (from pprof.top) and want to understand ALL the different ways it gets called.
+
+**Difference from peek**: peek shows immediate callers/callees; focus_paths shows complete call stacks.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -406,8 +504,15 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
-				Name:        "pprof.merge",
-				Description: "Merge multiple pprof profiles into a single aggregated profile. Useful for combining profiles from different time periods or instances.",
+				Name: "pprof.merge",
+				Description: `Merge multiple profiles into a single aggregated profile.
+
+**When to use**:
+- Combine profiles from different instances/pods
+- Aggregate profiles over a longer time period
+- Create a representative profile from multiple samples
+
+**Output**: A new .pprof file that can be analyzed with other pprof.* tools.`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -419,6 +524,41 @@ func ToolSchemas() []ToolDefinition {
 				},
 			},
 			Handler: pprofMergeTool,
+		},
+		{
+			Schema: schema.Tool{
+				Name: "datadog.function_history",
+				Description: `Search for a function across multiple profiles over time.
+
+**When to use**: To track how a function's CPU usage changes over time. Useful for:
+- Verifying a performance fix reduced CPU usage
+- Finding when a regression was introduced
+- Monitoring function performance over deployments
+
+**Workflow**:
+1. Specify the function pattern (e.g., "getFinishedSync")
+2. Set time range with from/to or hours
+3. Tool downloads profiles and searches each one
+4. Returns a table showing function's CPU% at each timestamp
+
+**Example**: Track "myFunction" over the last 24 hours:
+  function="myFunction", hours=24, limit=10`,
+				InputSchema: schema.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]json.RawMessage{
+						"service":  prop("string", "The service name (required)"),
+						"env":      prop("string", "The environment (required)"),
+						"function": prop("string", "Function name or pattern to search for (required)"),
+						"from":     prop("string", "Start time (RFC3339 or relative like '-24h')"),
+						"to":       prop("string", "End time (RFC3339 or relative)"),
+						"hours":    prop("integer", "Number of hours to look back (default: 72)"),
+						"limit":    prop("integer", "Maximum number of profiles to check (default: 10)"),
+						"site":     prop("string", "Datadog site"),
+					},
+					Required: []string{"service", "env", "function"},
+				},
+			},
+			Handler: functionHistoryTool,
 		},
 	}
 }

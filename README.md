@@ -2,19 +2,22 @@
 
 MCP server and CLI tooling for Datadog profile download and deterministic pprof analysis.
 
+## Features
+
+- **Download profiles** from Datadog Continuous Profiler
+- **Analyze profiles** with pprof (top, peek, list, storylines, etc.)
+- **Compare profiles** before/after to verify performance fixes
+- **Track functions over time** across multiple profiles
+- **Filter by tags** (tenant_id, connector_id, etc.)
+- **Generate visualizations** (flamegraphs, call graphs)
+
 ## Requirements
 
-- Go 1.25.5
-- Datadog API keys in env:
+- Go 1.22+
+- Datadog API keys:
   - `DD_API_KEY`
   - `DD_APP_KEY`
-  - `DD_SITE` (optional, default `us3.datadoghq.com`)
-
-If `github.com/conductorone/mcp-go-sdk` is private, configure git to use SSH:
-
-```bash
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-```
+  - `DD_SITE` (optional, defaults to `us3.datadoghq.com`)
 
 ## Quick Start
 
@@ -25,47 +28,93 @@ make build-profctl
 make build-server
 ```
 
-### CLI usage
+## CLI Usage
 
-List candidates and pick a representative window:
-
-```bash
-./bin/profctl datadog profiles list --service temporal_sync --env prod-usw2 --hours 72 --limit 20 --json
-./bin/profctl datadog profiles pick --service temporal_sync --env prod-usw2 --strategy most_samples --hours 72 --limit 20 --json
-```
-
-Download a specific profile bundle:
+### List and pick profiles
 
 ```bash
-./bin/profctl download --service temporal_sync --env prod-usw2 --out ./profiles \
-  --profile_id <PROFILE_ID> --event_id <EVENT_ID> --hours 72
+# List available profiles from the last 24 hours
+./bin/profctl datadog profiles list --service myservice --env prod --hours 24
+
+# Pick oldest profile (for baseline comparison)
+./bin/profctl datadog profiles pick --service myservice --env prod --strategy oldest
+
+# Pick latest profile
+./bin/profctl datadog profiles pick --service myservice --env prod --strategy latest
 ```
 
-Inspect metadata and storylines:
+### Download profiles
 
 ```bash
-./bin/profctl pprof meta --profile ./profiles/temporal_sync_prod-usw2_cpu.pprof --json
-./bin/profctl pprof storylines --profile ./profiles/temporal_sync_prod-usw2_cpu.pprof --n 4 \
-  --repo_prefix gitlab.com/ductone/c1 --repo_root . --json
+# Download latest profile bundle
+./bin/profctl download --service myservice --env prod --out ./profiles
+
+# Download specific profile by ID
+./bin/profctl download --service myservice --env prod --out ./profiles \
+  --profile_id <PROFILE_ID> --event_id <EVENT_ID>
 ```
 
-## MCP Server (Claude Desktop)
+### Analyze profiles
 
-`pprof-mcp` runs over stdio. Example config:
+```bash
+# Show top CPU consumers
+./bin/profctl pprof top --profile ./profiles/myservice_prod_cpu.pprof --cum --nodecount 20
 
-Linux: `~/.config/Claude/claude_desktop_config.json`
-macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+# Show callers/callees of a function
+./bin/profctl pprof peek --profile ./profiles/myservice_prod_cpu.pprof --regex "myFunction"
+
+# Line-level annotation
+./bin/profctl pprof list --profile ./profiles/myservice_prod_cpu.pprof --function "myFunction" --repo_root .
+
+# Find hot paths in your code
+./bin/profctl pprof storylines --profile ./profiles/myservice_prod_cpu.pprof \
+  --n 4 --repo_prefix github.com/myorg/myrepo --repo_root .
+```
+
+### Compare profiles
+
+```bash
+# Compare before/after profiles
+./bin/profctl pprof diff_top --before ./baseline_cpu.pprof --after ./current_cpu.pprof
+```
+
+## MCP Server
+
+The MCP server runs over stdio and integrates with Claude Desktop/Claude Code.
+
+### Configuration
+
+Add to your Claude config:
+
+**Linux**: `~/.config/Claude/claude_desktop_config.json`
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "pprof-mcp": {
+      "command": "/path/to/pprof-mcp-server",
+      "env": {
+        "DD_API_KEY": "your-api-key",
+        "DD_APP_KEY": "your-app-key",
+        "DD_SITE": "us3.datadoghq.com"
+      }
+    }
+  }
+}
+```
+
+Or run from source:
 
 ```json
 {
   "mcpServers": {
     "pprof-mcp": {
       "command": "bash",
-      "args": ["-lc", "cd /home/arreyder/repos/pprof-mcp && DD_API_KEY=... DD_APP_KEY=... go run ./cmd/pprof-mcp-server"],
+      "args": ["-lc", "cd /path/to/pprof-mcp && go run ./cmd/pprof-mcp-server"],
       "env": {
-        "DD_API_KEY": "...",
-        "DD_APP_KEY": "...",
-        "DD_SITE": "us3.datadoghq.com"
+        "DD_API_KEY": "your-api-key",
+        "DD_APP_KEY": "your-app-key"
       }
     }
   }
@@ -74,13 +123,40 @@ macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ## MCP Tools
 
-See `docs/TOOLING_PROMPT.md` for the full tool list and usage guidance.
+| Tool | Description |
+|------|-------------|
+| `profiles.download_latest_bundle` | Download profile bundle from Datadog |
+| `datadog.profiles.list` | List available profiles (supports relative times like `-3h`) |
+| `datadog.profiles.pick` | Select profile by strategy (latest, oldest, closest, index) |
+| `datadog.function_history` | Track a function's CPU% across profiles over time |
+| `pprof.top` | Show top functions by CPU/memory |
+| `pprof.peek` | Show callers and callees |
+| `pprof.list` | Line-level source annotation |
+| `pprof.storylines` | Find hot code paths in your repository |
+| `pprof.diff_top` | Compare two profiles |
+| `pprof.focus_paths` | Show all call paths to a function |
+| `pprof.traces_head` | Show stack traces |
+| `pprof.tags` | Filter by tags or list available tags |
+| `pprof.merge` | Merge multiple profiles |
+| `pprof.flamegraph` | Generate SVG flamegraph |
+| `pprof.callgraph` | Generate call graph (DOT/SVG/PNG) |
+| `pprof.meta` | Extract profile metadata |
+| `repo.services.discover` | Discover services in a repository |
+
+See `docs/TOOLING_PROMPT.md` for detailed usage guidance and workflows.
 
 ## Makefile Targets
 
-- `make vendor` - sync `vendor/`
-- `make test` - run tests with vendored deps
-- `make build-profctl` - build CLI to `bin/profctl`
-- `make build-server` - build MCP server to `bin/pprof-mcp-server`
-- `make run-server` - run the MCP server over stdio
+| Target | Description |
+|--------|-------------|
+| `make vendor` | Sync vendor/ directory |
+| `make test` | Run tests |
+| `make build-profctl` | Build CLI to `bin/profctl` |
+| `make build-server` | Build MCP server to `bin/pprof-mcp-server` |
+| `make install` | Install both binaries |
+| `make run-server` | Run MCP server (for development) |
+| `make clean` | Remove build artifacts |
 
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 - see the [LICENSE](LICENSE) file for details.

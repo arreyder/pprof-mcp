@@ -98,27 +98,75 @@ func ListProfiles(ctx context.Context, params ListProfilesParams) (ListProfilesR
 	}, nil
 }
 
+// parseRelativeOrAbsoluteTime parses a time string that can be:
+// - relative: "-1h", "-30m", "-2h30m" (negative duration from now)
+// - absolute: RFC3339 format like "2025-12-31T19:00:00Z"
+// Returns the parsed time formatted as RFC3339.
+func parseRelativeOrAbsoluteTime(value string, defaultTime time.Time) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultTime.UTC().Format(time.RFC3339), nil
+	}
+
+	// Check if it's a relative time (starts with - or +)
+	if strings.HasPrefix(value, "-") || strings.HasPrefix(value, "+") {
+		duration, err := time.ParseDuration(value)
+		if err != nil {
+			return "", fmt.Errorf("invalid relative time %q: %w", value, err)
+		}
+		return time.Now().Add(duration).UTC().Format(time.RFC3339), nil
+	}
+
+	// Try parsing as RFC3339
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		// Try RFC3339Nano
+		parsed, err = time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return "", fmt.Errorf("invalid time format %q (expected RFC3339 or relative like -1h): %w", value, err)
+		}
+	}
+	return parsed.UTC().Format(time.RFC3339), nil
+}
+
 func resolveTimeWindow(from, to string, hours int) (string, string, []string) {
 	warnings := []string{}
+	now := time.Now()
+
 	if from != "" || to != "" {
-		fromTS := from
-		toTS := to
-		if fromTS == "" {
-			fromTS = time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339)
+		var fromTS, toTS string
+		var err error
+
+		if from == "" {
+			fromTS = now.Add(-72 * time.Hour).UTC().Format(time.RFC3339)
 			warnings = append(warnings, "from not provided; defaulted to last 72h")
+		} else {
+			fromTS, err = parseRelativeOrAbsoluteTime(from, now.Add(-72*time.Hour))
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("invalid from time: %v; defaulted to last 72h", err))
+				fromTS = now.Add(-72 * time.Hour).UTC().Format(time.RFC3339)
+			}
 		}
-		if toTS == "" {
-			toTS = time.Now().UTC().Format(time.RFC3339)
+
+		if to == "" {
+			toTS = now.UTC().Format(time.RFC3339)
 			warnings = append(warnings, "to not provided; defaulted to now")
+		} else {
+			toTS, err = parseRelativeOrAbsoluteTime(to, now)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("invalid to time: %v; defaulted to now", err))
+				toTS = now.UTC().Format(time.RFC3339)
+			}
 		}
+
 		return fromTS, toTS, warnings
 	}
 
 	if hours <= 0 {
 		hours = 72
 	}
-	toTS := time.Now().UTC().Format(time.RFC3339)
-	fromTS := time.Now().Add(-time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
+	toTS := now.UTC().Format(time.RFC3339)
+	fromTS := now.Add(-time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
 	return fromTS, toTS, warnings
 }
 
@@ -240,11 +288,76 @@ func sampleScore(fields map[string]float64) float64 {
 }
 
 func FormatCandidatesTable(candidates []ProfileCandidate) string {
-	lines := []string{fmt.Sprintf("%3s  %-24s  %-36s  %-36s", "idx", "timestamp", "profile_id", "event_id")}
+	lines := []string{fmt.Sprintf("%3s  %-24s  %-36s  %s", "idx", "timestamp", "profile_id", "samples")}
 	for idx, candidate := range candidates {
-		lines = append(lines, fmt.Sprintf("%3d  %-24s  %-36s  %-36s", idx, candidate.Timestamp, candidate.ProfileID, candidate.EventID))
+		sampleInfo := formatSampleInfo(candidate.NumericFields)
+		lines = append(lines, fmt.Sprintf("%3d  %-24s  %-36s  %s", idx, candidate.Timestamp, candidate.ProfileID, sampleInfo))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// formatSampleInfo extracts and formats sample-related metrics from numeric fields.
+func formatSampleInfo(fields map[string]float64) string {
+	if len(fields) == 0 {
+		return "-"
+	}
+
+	var parts []string
+
+	// Look for common sample-related fields
+	sampleKeys := []string{
+		"cpu-samples", "cpu_samples",
+		"alloc-samples", "alloc_samples",
+		"total-samples", "total_samples",
+		"samples",
+	}
+
+	for _, key := range sampleKeys {
+		if val, ok := fields[key]; ok {
+			parts = append(parts, formatMetricValue(key, val))
+		}
+	}
+
+	// Also look for duration
+	durationKeys := []string{"duration", "duration_ns", "profile_duration"}
+	for _, key := range durationKeys {
+		if val, ok := fields[key]; ok {
+			// Convert nanoseconds to seconds if it looks like ns
+			if val > 1e9 {
+				parts = append(parts, fmt.Sprintf("dur=%.1fs", val/1e9))
+			} else if val > 1000 {
+				parts = append(parts, fmt.Sprintf("dur=%.1fms", val/1e6))
+			} else {
+				parts = append(parts, fmt.Sprintf("dur=%.1f", val))
+			}
+			break
+		}
+	}
+
+	if len(parts) == 0 {
+		// Fall back to showing the first numeric field
+		for key, val := range fields {
+			return formatMetricValue(key, val)
+		}
+		return "-"
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func formatMetricValue(key string, val float64) string {
+	// Shorten common key names
+	shortKey := key
+	shortKey = strings.ReplaceAll(shortKey, "-samples", "")
+	shortKey = strings.ReplaceAll(shortKey, "_samples", "")
+	shortKey = strings.ReplaceAll(shortKey, "samples", "smp")
+
+	if val >= 1e6 {
+		return fmt.Sprintf("%s=%.1fM", shortKey, val/1e6)
+	} else if val >= 1e3 {
+		return fmt.Sprintf("%s=%.1fK", shortKey, val/1e3)
+	}
+	return fmt.Sprintf("%s=%.0f", shortKey, val)
 }
 
 func loadKeys() (string, string, error) {

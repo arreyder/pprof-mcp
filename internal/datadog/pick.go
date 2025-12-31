@@ -10,6 +10,7 @@ type PickStrategy string
 
 const (
 	PickLatest       PickStrategy = "latest"
+	PickOldest       PickStrategy = "oldest"
 	PickClosestToTS  PickStrategy = "closest_to_ts"
 	PickMostSamples  PickStrategy = "most_samples"
 	PickManualIndex  PickStrategy = "manual_index"
@@ -64,6 +65,9 @@ func PickProfile(ctx context.Context, params PickProfilesParams) (PickResult, er
 	switch params.Strategy {
 	case PickLatest, "":
 		return PickResult{Candidate: candidates[0], Reason: "latest"}, nil
+	case PickOldest:
+		// Candidates are sorted newest first, so oldest is last
+		return PickResult{Candidate: candidates[len(candidates)-1], Reason: "oldest"}, nil
 	case PickClosestToTS:
 		target, err := parseTimestamp(params.TargetTS)
 		if err != nil {

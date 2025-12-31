@@ -380,6 +380,30 @@ func pprofMergeTool(ctx context.Context, args map[string]any) (interface{}, erro
 	return marshalJSON(payload)
 }
 
+func functionHistoryTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := datadog.SearchFunctionHistory(ctx, datadog.FunctionHistoryParams{
+		Service:  getString(args, "service"),
+		Env:      getString(args, "env"),
+		Function: getString(args, "function"),
+		From:     getString(args, "from"),
+		To:       getString(args, "to"),
+		Hours:    getInt(args, "hours", 72),
+		Limit:    getInt(args, "limit", 10),
+		Site:     getString(args, "site"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("profctl function-history --service %s --env %s --function %s",
+			result.Service, result.Env, result.Function),
+		"result": result,
+		"table":  datadog.FormatFunctionHistoryTable(result),
+	}
+	return marshalJSON(payload)
+}
+
 func getString(args map[string]any, key string) string {
 	if val, ok := args[key]; ok {
 		switch typed := val.(type) {

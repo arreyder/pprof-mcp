@@ -32,11 +32,15 @@ install-server:
 install: install-profctl install-server
 
 config:
+	@echo "Example Claude Desktop config (update path as needed):"
 	@printf '%s\n' '{' \
 	  '  "mcpServers": {' \
 	  '    "pprof-mcp": {' \
-	  '      "command": "bash",' \
-	  '      "args": ["-lc", "cd /home/arreyder/repos/pprof-mcp && go run ./cmd/pprof-mcp-server"]' \
+	  '      "command": "$(CURDIR)/bin/pprof-mcp-server",' \
+	  '      "env": {' \
+	  '        "DD_API_KEY": "your-api-key",' \
+	  '        "DD_APP_KEY": "your-app-key"' \
+	  '      }' \
 	  '    }' \
 	  '  }' \
 	  '}'
