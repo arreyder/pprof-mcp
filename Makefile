@@ -1,7 +1,9 @@
 SHELL := /bin/bash
 GOFLAGS ?= -mod=vendor
 
-.PHONY: tidy vendor test build-profctl build-server run-server install-profctl clean
+.PHONY: all tidy vendor test build-profctl build-server run-server install-profctl config clean
+
+all: vendor test build-profctl build-server
 
 tidy:
 	go mod tidy
@@ -23,6 +25,18 @@ run-server:
 
 install-profctl:
 	GOFLAGS='$(GOFLAGS)' go install ./cmd/profctl
+
+config:
+	@cat <<'EOF'
+{
+  "mcpServers": {
+    "pprof-mcp": {
+      "command": "bash",
+      "args": ["-lc", "cd /home/arreyder/repos/pprof-mcp && go run ./cmd/pprof-mcp-server"]
+    }
+  }
+}
+EOF
 
 clean:
 	rm -rf bin
