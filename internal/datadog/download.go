@@ -198,7 +198,11 @@ func extractProfileMetadata(listResp map[string]any) (string, string, string, er
 		return "", "", "", errors.New("unexpected datadog response format")
 	}
 
-	profileID := getString(entry, "profile-id")
+	// profile-id is nested inside attributes
+	profileID := getStringNested(entry, "attributes", "profile-id")
+	if profileID == "" {
+		profileID = getString(entry, "profile-id")
+	}
 	if profileID == "" {
 		profileID = getString(entry, "profile_id")
 	}

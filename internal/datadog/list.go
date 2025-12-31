@@ -134,10 +134,14 @@ func parseCandidates(resp map[string]any) ([]ProfileCandidate, error) {
 			continue
 		}
 		candidate := ProfileCandidate{
-			ProfileID:     getString(entry, "profile-id"),
+			ProfileID:     getStringNested(entry, "attributes", "profile-id"),
 			EventID:       getString(entry, "id"),
 			Timestamp:     getStringNested(entry, "attributes", "timestamp"),
 			NumericFields: extractNumericFields(entry),
+		}
+		// Fallback: check top-level for backwards compatibility
+		if candidate.ProfileID == "" {
+			candidate.ProfileID = getString(entry, "profile-id")
 		}
 		if candidate.ProfileID == "" {
 			candidate.ProfileID = getString(entry, "profile_id")

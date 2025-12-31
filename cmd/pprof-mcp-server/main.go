@@ -17,21 +17,17 @@ import (
 )
 
 func main() {
+	// Create tools provider with full schemas
+	toolsProvider := NewSchemaToolsProvider()
+	for _, def := range ToolSchemas() {
+		toolsProvider.AddTool(def)
+	}
+
 	s := server.NewMCPServer("pprof-mcp",
 		server.WithName("pprof MCP"),
 		server.WithVersion("0.1.0"),
 		server.WithInstructions("Profiling tools for Datadog profile download and deterministic pprof analysis."),
-		server.WithTool("profiles.download_latest_bundle", downloadTool),
-		server.WithTool("pprof.top", pprofTopTool),
-		server.WithTool("pprof.peek", pprofPeekTool),
-		server.WithTool("pprof.list", pprofListTool),
-		server.WithTool("pprof.traces_head", pprofTracesTool),
-		server.WithTool("pprof.diff_top", pprofDiffTool),
-		server.WithTool("pprof.meta", pprofMetaTool),
-		server.WithTool("pprof.storylines", pprofStorylinesTool),
-		server.WithTool("datadog.profiles.list", datadogProfilesListTool),
-		server.WithTool("datadog.profiles.pick", datadogProfilesPickTool),
-		server.WithTool("repo.services.discover", repoServicesTool),
+		server.WithToolsProvider(toolsProvider),
 	)
 
 	log.Println("Starting pprof MCP server over stdio")
@@ -112,11 +108,12 @@ func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error
 
 func pprofListTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := pprof.RunList(ctx, pprof.ListParams{
-		Profile:  getString(args, "profile"),
-		Binary:   getString(args, "binary"),
-		Function: getString(args, "function"),
-		RepoRoot: getString(args, "repo_root"),
-		TrimPath: getString(args, "trim_path"),
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		Function:    getString(args, "function"),
+		RepoRoot:    getString(args, "repo_root"),
+		TrimPath:    getString(args, "trim_path"),
+		SourcePaths: parseStringList(args, "source_paths"),
 	})
 	if err != nil {
 		return nil, err
@@ -270,6 +267,119 @@ func repoServicesTool(ctx context.Context, args map[string]any) (interface{}, er
 	return marshalJSON(payload)
 }
 
+func pprofTagsTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunTags(ctx, pprof.TagsParams{
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		TagFocus:    getString(args, "tag_focus"),
+		TagIgnore:   getString(args, "tag_ignore"),
+		TagShow:     getString(args, "tag_show"),
+		Cum:         getBool(args, "cum"),
+		NodeCount:   getInt(args, "nodecount", 0),
+		SampleIndex: getString(args, "sample_index"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": result.Command,
+		"raw":     result.Raw,
+	}
+	if len(result.Tags) > 0 {
+		payload["tags"] = result.Tags
+	}
+	return marshalJSON(payload)
+}
+
+func pprofFlamegraphTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunFlamegraph(ctx, pprof.FlamegraphParams{
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		OutputPath:  getString(args, "output_path"),
+		Focus:       getString(args, "focus"),
+		Ignore:      getString(args, "ignore"),
+		TagFocus:    getString(args, "tag_focus"),
+		TagIgnore:   getString(args, "tag_ignore"),
+		SampleIndex: getString(args, "sample_index"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command":     result.Command,
+		"output_path": result.OutputPath,
+		"message":     result.Message,
+	}
+	return marshalJSON(payload)
+}
+
+func pprofCallgraphTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunCallgraph(ctx, pprof.CallgraphParams{
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		OutputPath:  getString(args, "output_path"),
+		Format:      getString(args, "format"),
+		Focus:       getString(args, "focus"),
+		Ignore:      getString(args, "ignore"),
+		NodeCount:   getInt(args, "nodecount", 0),
+		EdgeFrac:    getFloat(args, "edge_frac", 0),
+		NodeFrac:    getFloat(args, "node_frac", 0),
+		SampleIndex: getString(args, "sample_index"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command":     result.Command,
+		"output_path": result.OutputPath,
+		"format":      result.Format,
+		"message":     result.Message,
+	}
+	return marshalJSON(payload)
+}
+
+func pprofFocusPathsTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunFocusPaths(ctx, pprof.FocusPathsParams{
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		Function:    getString(args, "function"),
+		Cum:         getBool(args, "cum"),
+		NodeCount:   getInt(args, "nodecount", 0),
+		SampleIndex: getString(args, "sample_index"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": result.Command,
+		"raw":     result.Raw,
+	}
+	return marshalJSON(payload)
+}
+
+func pprofMergeTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunMerge(ctx, pprof.MergeParams{
+		Profiles:   parseStringList(args, "profiles"),
+		Binary:     getString(args, "binary"),
+		OutputPath: getString(args, "output_path"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command":     result.Command,
+		"output_path": result.OutputPath,
+		"input_count": result.InputCount,
+		"message":     result.Message,
+	}
+	return marshalJSON(payload)
+}
+
 func getString(args map[string]any, key string) string {
 	if val, ok := args[key]; ok {
 		switch typed := val.(type) {
@@ -319,6 +429,32 @@ func getBool(args map[string]any, key string) bool {
 		}
 	}
 	return false
+}
+
+func getFloat(args map[string]any, key string, fallback float64) float64 {
+	if val, ok := args[key]; ok {
+		switch typed := val.(type) {
+		case float64:
+			return typed
+		case float32:
+			return float64(typed)
+		case int:
+			return float64(typed)
+		case int64:
+			return float64(typed)
+		case json.Number:
+			parsed, err := typed.Float64()
+			if err == nil {
+				return parsed
+			}
+		case string:
+			parsed, err := strconv.ParseFloat(typed, 64)
+			if err == nil {
+				return parsed
+			}
+		}
+	}
+	return fallback
 }
 
 func parseStringList(args map[string]any, key string) []string {

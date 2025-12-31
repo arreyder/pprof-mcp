@@ -28,7 +28,7 @@ type TopReport struct {
 	Rows    []TopRow   `json:"rows"`
 }
 
-var tableHeaderPattern = regexp.MustCompile(`(?i)^\s*flat\s+flat%\s+sum%\s+cum\s+cum%\s+name\s*$`)
+var tableHeaderPattern = regexp.MustCompile(`(?i)^\s*flat\s+flat%\s+sum%\s+cum\s+cum%`)
 
 func ParseTop(output string) TopReport {
 	lines := strings.Split(output, "\n")
