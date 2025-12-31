@@ -1,0 +1,32 @@
+# github.com/conductorone/mcp-go-sdk v0.0.2-0.20250409052025-bb025f7b7af9
+## explicit; go 1.24.1
+github.com/conductorone/mcp-go-sdk/mcp/schema
+github.com/conductorone/mcp-go-sdk/mcp/server
+github.com/conductorone/mcp-go-sdk/mcp/server/transport
+# github.com/davecgh/go-spew v1.1.1
+## explicit
+github.com/davecgh/go-spew/spew
+# github.com/go-logr/logr v1.4.2
+## explicit; go 1.18
+github.com/go-logr/logr
+# github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6
+## explicit; go 1.24.0
+github.com/google/pprof/profile
+# github.com/google/uuid v1.6.0
+## explicit
+github.com/google/uuid
+# github.com/pmezard/go-difflib v1.0.0
+## explicit
+github.com/pmezard/go-difflib/difflib
+# github.com/stretchr/testify v1.10.0
+## explicit; go 1.17
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/assert/yaml
+github.com/stretchr/testify/require
+# github.com/veqryn/slog-context v0.8.0
+## explicit; go 1.21
+github.com/veqryn/slog-context
+github.com/veqryn/slog-context/internal/attr
+# gopkg.in/yaml.v3 v3.0.1
+## explicit
+gopkg.in/yaml.v3
