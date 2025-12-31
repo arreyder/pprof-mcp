@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 GOFLAGS ?= -mod=vendor
 
-.PHONY: all tidy vendor test build-profctl build-server run-server install-profctl config clean
+.PHONY: all tidy vendor test build-profctl build-server run-server install install-profctl install-server config clean
 
 all: vendor test build-profctl build-server
 
@@ -25,6 +25,11 @@ run-server:
 
 install-profctl:
 	GOFLAGS='$(GOFLAGS)' go install ./cmd/profctl
+
+install-server:
+	GOFLAGS='$(GOFLAGS)' go install ./cmd/pprof-mcp-server
+
+install: install-profctl install-server
 
 config:
 	@printf '%s\n' '{' \
