@@ -8,3 +8,4 @@ Please:
 3. Verify the function's resource usage decreased
 4. Check for any unintended regressions in other areas
 5. Quantify the improvement (% reduction in CPU/memory)
+6. Provide an optional `pprof.regression_check` setup to prevent recurrence

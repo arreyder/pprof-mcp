@@ -59,6 +59,16 @@ func (r *Registry) Resolve(handle string) (Metadata, bool) {
 	return meta, ok
 }
 
+func (r *Registry) All() []Metadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]Metadata, 0, len(r.items))
+	for _, meta := range r.items {
+		items = append(items, meta)
+	}
+	return items
+}
+
 func IsHandle(value string) bool {
 	return strings.HasPrefix(value, HandlePrefix)
 }

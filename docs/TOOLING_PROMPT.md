@@ -9,6 +9,7 @@ You are a Go performance profiling agent. Your job is to produce evidence-driven
 ```
 1. datadog.profiles.list     -> See available profiles
 2. profiles.download_latest_bundle -> Download latest profile
+   (or use pprof.discover for an end-to-end analysis)
 3. pprof.top                 -> Find hottest functions
 4. pprof.peek <function>     -> See callers/callees
 5. pprof.list <function>     -> Line-level detail
@@ -94,6 +95,12 @@ datadog.profiles.compare_range service=X env=Y \
    -> Use with Datadog dashboards for profile/metric correlation
 ```
 
+### 9. Aggregate Profiles for Stability
+```
+1. datadog.profiles.aggregate service=X env=Y window="1h" limit=10
+   -> Returns a merged profile handle for stable analysis
+```
+
 ========================================================
 ## MANDATORY: 2-PASS ANALYSIS LOOP
 
@@ -114,7 +121,8 @@ datadog.profiles.compare_range service=X env=Y \
 | Tool | Purpose |
 |------|---------|
 | `datadog.profiles.list` | List available profiles. Supports relative times: `-3h`, `-24h` |
-| `datadog.profiles.pick` | Select profile by strategy: `latest`, `oldest`, `closest`, `index`, `anomaly` |
+| `datadog.profiles.pick` | Select profile by strategy: `latest`, `oldest`, `closest_to_ts`, `manual_index`, `most_samples`, `anomaly` |
+| `datadog.profiles.aggregate` | Aggregate profiles over a window into a merged handle |
 | `datadog.profiles.compare_range` | Compare profiles from two time ranges (downloads and diffs automatically) |
 | `datadog.profiles.near_event` | Find profiles around a specific event time (OOM, restart, incident) |
 | `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container, service) |
@@ -124,25 +132,32 @@ datadog.profiles.compare_range service=X env=Y \
 **Profile Selection Strategies** (`datadog.profiles.pick`):
 - `latest` - Most recent profile (default)
 - `oldest` - Oldest profile in range (good for baseline)
-- `closest` - Profile closest to target_ts
-- `index` - Specific index from list results
+- `closest_to_ts` - Profile closest to target_ts
+- `manual_index` - Specific index from list results
+- `most_samples` - Profile with highest sample count
 - `anomaly` - Profile with highest statistical deviation (z-score > 2σ)
 
 ### Profile Analysis
 
 | Tool | Purpose |
 |------|---------|
-| `pprof.top` | Show top functions by CPU/memory. Start here. Returns contextual hints. |
+| `pprof.top` | Show top functions by CPU/memory. Start here. Supports baseline comparisons. |
 | `pprof.peek` | Show callers and callees of a function. Use `sample_index=alloc_space` for heap! |
 | `pprof.list` | Line-level source annotation |
+| `pprof.discover` | End-to-end discovery analysis (downloads + analysis suite) |
 | `pprof.storylines` | Find hot code paths in YOUR repository. Auto-detects heap profiles. |
 | `pprof.alloc_paths` | **Analyze allocation paths** with rates (MB/min), filtering, caller chains |
 | `pprof.overhead_report` | **Detect observability overhead** - OTel, zap, gRPC, protobuf breakdown |
 | `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | **Detect RSS/heap mismatch** - SQLite, CGO, goroutine stack issues |
+| `pprof.goroutine_analysis` | Detect goroutine leaks and blocking patterns |
+| `pprof.contention_analysis` | Analyze mutex/block contention by lock site |
+| `pprof.cross_correlate` | Correlate hotspots across CPU/heap/mutex profiles |
+| `pprof.hotspot_summary` | Quick top hotspots across profile types |
 | `pprof.focus_paths` | Show all call paths leading to a function |
 | `pprof.traces_head` | Raw stack traces |
 | `pprof.diff_top` | Compare two profiles (before/after) |
+| `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
 | `pprof.meta` | Profile metadata (sample types, duration) |
 
 **Memory Sanity Tool** (`pprof.memory_sanity`):
@@ -218,11 +233,13 @@ pprof.peek --profile <heap.pprof> --regex <hot_function> --sample_index alloc_sp
 ```
 pprof.top --profile <mutex.pprof> --sample_index delay
 pprof.top --profile <block.pprof>
+pprof.contention_analysis --profile <mutex.pprof>
 ```
 
 ### 1.4) Goroutine Snapshot
 ```
 pprof.traces_head --profile <goroutines.pprof> --lines 300
+pprof.goroutine_analysis --profile <goroutines.pprof>
 ```
 
 ========================================================

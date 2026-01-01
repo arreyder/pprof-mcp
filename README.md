@@ -89,7 +89,11 @@ Add to your Claude config:
 **Linux**: `~/.config/Claude/claude_desktop_config.json`
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-Optional safety: set `PPROF_MCP_BASEDIR` to restrict file reads/writes to a base directory (paths are cleaned and must stay within this directory).
+Optional safety: set `PPROF_MCP_BASEDIR` to restrict file reads/writes to a base directory (paths are cleaned and must stay within this directory). For Codex clients that require tool names without dots, set `PPROF_MCP_TOOL_NAME_MODE=codex` (or pass `--tool-name-mode=codex`) to expose tool names with underscores instead of dots.
+
+### Codex Compatibility
+
+Codex requires tool names that match `^[a-zA-Z0-9_-]+$`. To support Codex, run the server with `PPROF_MCP_TOOL_NAME_MODE=codex` or `--tool-name-mode=codex`. This replaces dots with underscores (e.g., `pprof.top` becomes `pprof_top`) while keeping the same behavior and schemas.
 
 ```json
 {
@@ -132,6 +136,7 @@ Or run from source:
 | `profiles.download_latest_bundle` | Download profile bundle from Datadog |
 | `datadog.profiles.list` | List available profiles (supports relative times like `-3h`) |
 | `datadog.profiles.pick` | Select profile by strategy (latest, oldest, closest_to_ts, manual_index, most_samples, **anomaly**) |
+| `datadog.profiles.aggregate` | Aggregate multiple profiles over a time window into a merged handle |
 | `datadog.profiles.compare_range` | Compare profiles from two time ranges (before/after deployment) |
 | `datadog.profiles.near_event` | Find profiles around a specific event (OOM, restart, incident) |
 | `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container) |
@@ -144,12 +149,18 @@ Or run from source:
 | `pprof.top` | Show top functions by CPU/memory (includes contextual hints) |
 | `pprof.peek` | Show callers and callees (use `sample_index=alloc_space` for heap) |
 | `pprof.list` | Line-level source annotation |
+| `pprof.discover` | Run end-to-end discovery analysis (downloads + analyzes) |
 | `pprof.storylines` | Find hot code paths in your repository (auto-detects heap profiles) |
 | `pprof.alloc_paths` | Analyze allocation paths with rates (MB/min) and caller chains |
 | `pprof.overhead_report` | Detect observability overhead (OTel, zap, gRPC, protobuf) |
 | `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | Detect RSS/heap mismatch patterns (SQLite, CGO, goroutines) |
+| `pprof.goroutine_analysis` | Detect goroutine leaks and blocking patterns |
+| `pprof.contention_analysis` | Analyze mutex/block contention by lock site |
+| `pprof.cross_correlate` | Correlate hotspots across CPU/heap/mutex profiles |
+| `pprof.hotspot_summary` | Top hotspots across profile types in one call |
 | `pprof.diff_top` | Compare two profiles |
+| `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
 | `pprof.focus_paths` | Show all call paths to a function |
 | `pprof.traces_head` | Show stack traces |
 | `pprof.tags` | Filter by tags or list available tags |
@@ -160,6 +171,7 @@ Notes:
 - `pprof.peek`, `pprof.list`, `pprof.tags`, and `pprof.focus_paths` accept an optional `max_lines` argument to cap output size.
 - `pprof.traces_head` accepts `max_lines` as an alias for `lines`.
 - `profiles.download_latest_bundle` accepts `site` or `dd_site` (alias) for Datadog site selection.
+- `pprof.top` can persist baselines with `compare_baseline=true` (defaults to `.pprof-mcp-baselines.json`, override via `baseline_path`).
 
 ### Visualization
 

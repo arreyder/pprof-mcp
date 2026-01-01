@@ -63,3 +63,39 @@ func resolveHandlePath(baseDir, value string) (string, error) {
 func isHandle(value string) bool {
 	return profiles.IsHandle(value)
 }
+
+func resolveHandleMeta(value string) (profiles.Metadata, error) {
+	meta, ok := profileRegistry.Resolve(value)
+	if !ok {
+		return profiles.Metadata{}, fmt.Errorf("unknown profile handle %q", value)
+	}
+	return meta, nil
+}
+
+func findBundleMetas(handle string) ([]profiles.Metadata, error) {
+	meta, err := resolveHandleMeta(handle)
+	if err != nil {
+		return nil, err
+	}
+	all := profileRegistry.All()
+	matched := []profiles.Metadata{}
+	for _, item := range all {
+		if sameBundle(meta, item) {
+			matched = append(matched, item)
+		}
+	}
+	if len(matched) == 0 {
+		matched = append(matched, meta)
+	}
+	return matched, nil
+}
+
+func sameBundle(a, b profiles.Metadata) bool {
+	if a.ProfileID != "" && b.ProfileID != "" && a.EventID != "" && b.EventID != "" {
+		return a.ProfileID == b.ProfileID && a.EventID == b.EventID
+	}
+	if a.Timestamp != "" && b.Timestamp != "" && a.Service != "" && b.Service != "" {
+		return a.Timestamp == b.Timestamp && a.Service == b.Service && a.Env == b.Env
+	}
+	return false
+}

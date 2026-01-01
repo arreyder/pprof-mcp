@@ -4,21 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/pprof/profile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/arreyder/pprof-mcp/internal/datadog"
 	"github.com/arreyder/pprof-mcp/internal/pprof"
+	"github.com/arreyder/pprof-mcp/internal/profiles"
 	"github.com/arreyder/pprof-mcp/internal/services"
 )
 
 func main() {
+	nameModeFlag := flag.String("tool-name-mode", "", "Tool name mode: default or codex")
+	flag.Parse()
+
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "pprof-mcp",
 		Title:   "pprof MCP",
@@ -27,14 +34,24 @@ func main() {
 		Instructions: "Profiling tools for Datadog profile download and deterministic pprof analysis.",
 	})
 
+	nameMode := toolNameModeFromEnv()
+	if strings.TrimSpace(*nameModeFlag) != "" {
+		nameMode = toolNameModeFromString(strings.ToLower(strings.TrimSpace(*nameModeFlag)))
+	}
 	registry := NewToolRegistry()
 	if err := registry.AddAll(ToolSchemas()); err != nil {
 		log.Fatalf("Tool registry error: %v", err)
 	}
 	for _, def := range registry.List() {
 		def := def
-		mcp.AddTool(s, def.Tool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
-			return invokeTool(ctx, def.Tool, def.Handler, args)
+		tool := *def.Tool
+		canonicalName := def.Tool.Name
+		tool.Name = toolNameForMode(canonicalName, nameMode)
+		if nameMode == toolNameModeCodex {
+			tool.Description = fmt.Sprintf("Codex tool name: %s\n\n%s", tool.Name, tool.Description)
+		}
+		mcp.AddTool(s, &tool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			return invokeTool(ctx, &tool, canonicalName, def.Handler, args)
 		})
 	}
 
@@ -45,8 +62,8 @@ func main() {
 	}
 }
 
-func invokeTool(ctx context.Context, tool *mcp.Tool, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
-	if err := ValidateArgs(tool, args); err != nil {
+func invokeTool(ctx context.Context, tool *mcp.Tool, canonicalName string, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
+	if err := ValidateArgsWithName(tool, canonicalName, args); err != nil {
 		return ErrorResult(err, ""), nil, nil
 	}
 
@@ -210,6 +227,36 @@ func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error)
 	if len(result.Hints) > 0 {
 		payload["hints"] = result.Hints
 	}
+	if getBool(args, "compare_baseline") {
+		baselinePath := getString(args, "baseline_path")
+		if baselinePath == "" {
+			var err error
+			baselinePath, err = defaultBaselinePath()
+			if err != nil {
+				return nil, err
+			}
+		}
+		meta, err := pprof.RunMeta(profilePath)
+		if err != nil {
+			return nil, err
+		}
+		sampleKey := sampleIndex
+		if sampleKey == "" {
+			sampleKey = "default"
+		}
+		baselineKey := buildBaselineKey(
+			getString(args, "service"),
+			getString(args, "env"),
+			getString(args, "baseline_key"),
+			meta.DetectedKind,
+			sampleKey,
+		)
+		baseline, err := compareAndUpdateBaseline(baselinePath, baselineKey, meta.DetectedKind, sampleKey, result.Rows)
+		if err != nil {
+			return nil, err
+		}
+		payload["baseline"] = baseline
+	}
 	return marshalJSON(payload)
 }
 
@@ -328,6 +375,32 @@ func pprofDiffTool(ctx context.Context, args map[string]any) (interface{}, error
 	return marshalJSON(payload)
 }
 
+func pprofRegressionCheckTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	checks, err := parseRegressionChecks(args)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := pprof.RunRegressionCheck(ctx, pprof.RegressionCheckParams{
+		Profile:     getString(args, "profile"),
+		SampleIndex: getString(args, "sample_index"),
+		Checks:      checks,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof regression_check",
+		"result":  result,
+	}
+	summary := "All regression checks passed."
+	if !result.Passed {
+		summary = "One or more regression checks failed."
+	}
+	return marshalJSONWithSummary(summary, payload)
+}
+
 func pprofMetaTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	profilePath := getString(args, "profile")
 	meta, err := pprof.RunMeta(profilePath)
@@ -396,6 +469,22 @@ func pprofGoroutineAnalysisTool(ctx context.Context, args map[string]any) (inter
 		"result":  result,
 	}
 	summary := fmt.Sprintf("Found %d goroutines across %d states.", result.TotalGoroutines, len(result.ByState))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofContentionAnalysisTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunContentionAnalysis(pprof.ContentionAnalysisParams{
+		Profile: getString(args, "profile"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof contention_analysis",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Contention summary: %d contentions, %s total delay.", result.TotalContentions, result.TotalDelay)
 	return marshalJSONWithSummary(summary, payload)
 }
 
@@ -469,6 +558,59 @@ func pprofDiscoverTool(ctx context.Context, args map[string]any) (interface{}, e
 	return marshalJSONWithSummary(summary, payload)
 }
 
+func pprofCrossCorrelateTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	bundlePaths, warnings, err := resolveBundlePaths(args["bundle"])
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := pprof.RunCrossCorrelate(ctx, pprof.CrossCorrelateParams{
+		Profiles:  bundlePaths,
+		NodeCount: getInt(args, "nodecount", 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(warnings) > 0 {
+		result.Warnings = append(result.Warnings, warnings...)
+	}
+
+	payload := map[string]any{
+		"command": "pprof cross_correlate",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Found %d correlated hotspots.", len(result.Correlations))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofHotspotSummaryTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	bundlePaths, warnings, err := resolveBundlePaths(args["bundle"])
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := pprof.RunHotspotSummary(ctx, pprof.HotspotSummaryParams{
+		Profiles:  bundlePaths,
+		NodeCount: getInt(args, "nodecount", 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(warnings) > 0 {
+		result.Warnings = append(result.Warnings, warnings...)
+	}
+
+	payload := map[string]any{
+		"command": "pprof hotspot_summary",
+		"result":  result,
+	}
+	summary := "Hotspot summary generated."
+	if result.GoroutineCount != nil {
+		summary = fmt.Sprintf("Hotspot summary generated with %d goroutines.", *result.GoroutineCount)
+	}
+	return marshalJSONWithSummary(summary, payload)
+}
+
 func datadogProfilesListTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := datadog.ListProfiles(ctx, datadog.ListProfilesParams{
 		Service: getString(args, "service"),
@@ -513,6 +655,74 @@ func datadogProfilesPickTool(ctx context.Context, args map[string]any) (interfac
 		"result":  result,
 	}
 	return marshalJSON(payload)
+}
+
+func datadogProfilesAggregateTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := datadog.AggregateProfiles(ctx, datadog.AggregateProfilesParams{
+		Service:     getString(args, "service"),
+		Env:         getString(args, "env"),
+		Window:      getString(args, "window"),
+		Limit:       getInt(args, "limit", 10),
+		Site:        getString(args, "site"),
+		OutDir:      getString(args, "out_dir"),
+		ProfileType: getString(args, "profile_type"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	outputPath := ""
+	if len(result.ProfilePaths) == 1 {
+		outputPath = result.ProfilePaths[0]
+	} else {
+		mergePath, err := buildAggregateOutputPath(result.ProfileType, result.ProfilePaths[0])
+		if err != nil {
+			return nil, err
+		}
+		mergeResult, err := pprof.RunMerge(ctx, pprof.MergeParams{
+			Profiles:   result.ProfilePaths,
+			OutputPath: mergePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		outputPath = mergeResult.OutputPath
+	}
+
+	meta, err := pprof.RunMeta(outputPath)
+	if err != nil {
+		return nil, err
+	}
+	totalDuration := formatDurationNanos(meta.DurationNanos)
+
+	handle, err := profileRegistry.Register(profiles.Metadata{
+		Service:   result.Service,
+		Env:       result.Env,
+		Type:      result.ProfileType,
+		Timestamp: result.TimeRange.To,
+		Path:      outputPath,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("profctl datadog profiles aggregate --service %s --env %s --window %s", result.Service, result.Env, getString(args, "window")),
+		"result": map[string]any{
+			"handle":          handle,
+			"profile_type":    result.ProfileType,
+			"profiles_merged": len(result.ProfilePaths),
+			"time_range": map[string]any{
+				"from": result.TimeRange.From,
+				"to":   result.TimeRange.To,
+			},
+			"total_duration": totalDuration,
+			"hint":           fmt.Sprintf("Use pprof.top(profile=%q) to analyze aggregated data.", handle),
+			"warnings":       result.Warnings,
+		},
+	}
+	summary := fmt.Sprintf("Aggregated %d profiles into %s.", len(result.ProfilePaths), handle)
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func repoServicesTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -980,6 +1190,80 @@ func parseStringList(args map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func parseRegressionChecks(args map[string]any) ([]pprof.RegressionCheckSpec, error) {
+	raw, ok := args["checks"]
+	if !ok {
+		return nil, fmt.Errorf("checks are required")
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("checks must be an array")
+	}
+	checks := make([]pprof.RegressionCheckSpec, 0, len(items))
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("check entries must be objects")
+		}
+		function, _ := obj["function"].(string)
+		metric, _ := obj["metric"].(string)
+		max, ok := floatFromAny(obj["max"])
+		if !ok {
+			return nil, fmt.Errorf("check max must be a number")
+		}
+		checks = append(checks, pprof.RegressionCheckSpec{
+			Function: function,
+			Metric:   metric,
+			Max:      max,
+		})
+	}
+	return checks, nil
+}
+
+func floatFromAny(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err == nil {
+			return parsed, true
+		}
+	case string:
+		parsed, err := strconv.ParseFloat(typed, 64)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func formatDurationNanos(nanos int64) string {
+	if nanos <= 0 {
+		return ""
+	}
+	seconds := float64(nanos) / 1e9
+	return fmt.Sprintf("%.1fs", seconds)
+}
+
+func buildAggregateOutputPath(profileType, samplePath string) (string, error) {
+	if samplePath == "" {
+		return "", fmt.Errorf("sample path required to build output path")
+	}
+	dir := filepath.Dir(samplePath)
+	if dir == "" {
+		dir = "."
+	}
+	name := fmt.Sprintf("merged_%s_%d.pprof", profileType, time.Now().Unix())
+	return filepath.Join(dir, name), nil
 }
 
 func parseReportInputs(args map[string]any) ([]pprof.ReportInput, error) {
