@@ -296,7 +296,7 @@ Add `pprof.generate_report` that formats analysis results as markdown.
 
 ---
 
-### 7. Add `pprof.cross_correlate` Tool
+### 7. [x] Add `pprof.cross_correlate` Tool
 
 **Effort:** Medium
 **Value:** Medium
@@ -348,7 +348,7 @@ pprof.cross_correlate(bundle="handle:bundle123")
 
 ---
 
-### 8. Add `pprof.regression_check` Tool
+### 8. [x] Add `pprof.regression_check` Tool
 
 **Effort:** Low
 **Value:** Medium
@@ -1063,7 +1063,7 @@ Automatically detect if profiles have tenant labels and suggest `pprof.tags` ana
 
 ---
 
-### 11. Add `pprof.hotspot_summary` Tool
+### 11. [x] Add `pprof.hotspot_summary` Tool
 
 **Effort:** Low
 **Value:** Low
