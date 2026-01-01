@@ -848,11 +848,23 @@ functions:
 
 ---
 
-### 15. [x] Add `pprof.suggest_fix` Tool
+### 15. [DEPRECATED] `pprof.suggest_fix` Tool
 
-**Effort:** High
-**Value:** Very High
+**Status:** Deprecated - AI agent does this better
 
+**Reason for deprecation:**
+This tool attempted to automate fix suggestions via templated string replacements and PR generation. In practice:
+- Detection patterns are too narrow/brittle (failed to detect protojson overhead in testing)
+- Templated fixes lack contextual understanding
+- AI agents can read actual source code and suggest nuanced, situation-specific fixes
+- The tool adds complexity without proportional value
+
+**Recommended workflow instead:**
+1. Use `pprof.explain_overhead` to understand WHY something is slow
+2. Use `pprof.vendor_analyze` to identify WHICH packages are hot
+3. Let the AI agent read source code and suggest specific fixes
+
+**Original description:**
 Generate concrete, actionable code changes to fix identified performance issues, including file paths, diffs, and PR descriptions.
 
 **Requirements:**
