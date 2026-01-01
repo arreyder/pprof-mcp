@@ -83,12 +83,15 @@ func ToolSchemas() []ToolDefinition {
 
 **Example**: If pprof.top shows "json.Unmarshal" is hot, use peek to see which of YOUR functions call it.
 
+**Important for heap profiles**: Use sample_index="alloc_space" for allocation analysis, otherwise peek defaults to inuse_space which may not show all functions.
+
 **Optional**: Use max_lines to cap the output size.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"profile":   ProfilePath(),
-					"binary":    BinaryPathOptional(),
-					"regex":     prop("string", "Regex pattern to match function names (required)"),
-					"max_lines": integerProp("Maximum number of output lines to return", intPtr(0), nil),
+					"profile":      ProfilePath(),
+					"binary":       BinaryPathOptional(),
+					"regex":        prop("string", "Regex pattern to match function names (required)"),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space). Required for heap profiles to find allocation hot spots."),
+					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
 				}, "profile", "regex"),
 			},
 			Handler: pprofPeekTool,
@@ -184,15 +187,18 @@ func ToolSchemas() []ToolDefinition {
 - repo_prefix: Identifies your code (e.g., "github.com/myorg/myrepo")
 - n: Number of storylines to return (default: 4)
 
+**Auto-detection**: For heap profiles, automatically uses alloc_space to show allocation hot spots instead of just in-use memory.
+
 **Returns**: The most expensive execution paths with source-level detail, filtered to your repository code.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"profile":     ProfilePath(),
-					"n":           integerProp("Number of storylines to return (default: 4)", intPtr(0), nil),
-					"focus":       prop("string", "Regex to focus on specific functions"),
-					"ignore":      prop("string", "Regex to ignore specific functions"),
-					"repo_prefix": arrayOrStringPropSchema(prop("string", "Repository prefix"), "Repository path prefixes to identify your code (e.g., github.com/myorg/myrepo) (string or list)"),
-					"repo_root":   prop("string", "Local repository root path for source file resolution"),
-					"trim_path":   prop("string", "Path prefix to trim from source file paths"),
+					"profile":      ProfilePath(),
+					"n":            integerProp("Number of storylines to return (default: 4)", intPtr(0), nil),
+					"focus":        prop("string", "Regex to focus on specific functions"),
+					"ignore":       prop("string", "Regex to ignore specific functions"),
+					"repo_prefix":  arrayOrStringPropSchema(prop("string", "Repository prefix"), "Repository path prefixes to identify your code (e.g., github.com/myorg/myrepo) (string or list)"),
+					"repo_root":    prop("string", "Local repository root path for source file resolution"),
+					"trim_path":    prop("string", "Path prefix to trim from source file paths"),
+					"sample_index": prop("string", "Sample index to use (auto-detected for heap profiles: uses alloc_space)"),
 				}, "profile"),
 			},
 			Handler: pprofStorylinesTool,

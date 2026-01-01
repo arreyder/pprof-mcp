@@ -19,6 +19,7 @@ type StorylinesParams struct {
 	RepoPrefixes []string
 	RepoRoot     string
 	TrimPath     string
+	SampleIndex  string // Optional: if empty, auto-detects based on profile type
 }
 
 type StorylinesResult struct {
@@ -70,39 +71,39 @@ func RunStorylines(ctx context.Context, params StorylinesParams) (StorylinesResu
 		repoPrefixes = []string{"gitlab.com/ductone/c1", "github.com/conductorone"}
 	}
 
+	// Parse profile first to detect type and auto-select sample_index
+	prof, err := parseProfile(params.Profile)
+	if err != nil {
+		return StorylinesResult{}, err
+	}
+
+	// Auto-detect sample_index for heap profiles
+	sampleIndex := params.SampleIndex
+	if sampleIndex == "" {
+		sampleIndex = detectBestSampleIndex(prof)
+	}
+
 	topReport, err := RunTop(ctx, TopParams{
 		Profile:     params.Profile,
 		Cum:         true,
 		NodeCount:   40,
 		Focus:       params.Focus,
 		Ignore:      params.Ignore,
-		SampleIndex: "",
+		SampleIndex: sampleIndex,
 	})
 	if err != nil {
 		return StorylinesResult{}, err
 	}
 
-	prof, err := parseProfile(params.Profile)
-	if err != nil {
-		return StorylinesResult{}, err
-	}
-
-	defaultIndex := 0
-	if prof.DefaultSampleType != "" {
-		for i, st := range prof.SampleType {
-			if st.Type == prof.DefaultSampleType {
-				defaultIndex = i
-				break
-			}
-		}
-	}
+	// Find the value index matching our sample_index for call chain analysis
+	defaultIndex := findSampleIndex(prof, sampleIndex)
 
 	storylines := []Storyline{}
 	for _, row := range topReport.Rows {
 		if len(storylines) >= count {
 			break
 		}
-		storyline := buildStoryline(ctx, row, prof, defaultIndex, repoPrefixes, params)
+		storyline := buildStoryline(ctx, row, prof, defaultIndex, repoPrefixes, params, sampleIndex)
 		storylines = append(storylines, storyline)
 	}
 
@@ -112,7 +113,49 @@ func RunStorylines(ctx context.Context, params StorylinesParams) (StorylinesResu
 	}, nil
 }
 
-func buildStoryline(ctx context.Context, row pprofparse.TopRow, prof *profile.Profile, valueIndex int, prefixes []string, params StorylinesParams) Storyline {
+// detectBestSampleIndex returns the best sample index for analysis based on profile type.
+// For heap profiles, uses alloc_space (total allocations) over inuse_space (current live).
+// For other profiles, returns empty string to use pprof defaults.
+func detectBestSampleIndex(prof *profile.Profile) string {
+	hasAllocSpace := false
+	hasInuseSpace := false
+	for _, st := range prof.SampleType {
+		switch st.Type {
+		case "alloc_space", "alloc_objects":
+			hasAllocSpace = true
+		case "inuse_space", "inuse_objects":
+			hasInuseSpace = true
+		}
+	}
+	// If this looks like a heap profile, prefer alloc_space for allocation analysis
+	if hasAllocSpace && hasInuseSpace {
+		return "alloc_space"
+	}
+	return ""
+}
+
+// findSampleIndex returns the index of the given sample type in the profile.
+func findSampleIndex(prof *profile.Profile, sampleType string) int {
+	if sampleType == "" {
+		// Use default
+		if prof.DefaultSampleType != "" {
+			for i, st := range prof.SampleType {
+				if st.Type == prof.DefaultSampleType {
+					return i
+				}
+			}
+		}
+		return 0
+	}
+	for i, st := range prof.SampleType {
+		if st.Type == sampleType {
+			return i
+		}
+	}
+	return 0
+}
+
+func buildStoryline(ctx context.Context, row pprofparse.TopRow, prof *profile.Profile, valueIndex int, prefixes []string, params StorylinesParams, sampleIndex string) Storyline {
 	warnings := []string{}
 	leaf := row.Name
 
@@ -124,11 +167,11 @@ func buildStoryline(ctx context.Context, row pprofparse.TopRow, prof *profile.Pr
 		warnings = append(warnings, "no app-owned frame found")
 	}
 
-	peekLeaf := runEvidencePeek(ctx, params.Profile, leaf)
+	peekLeaf := runEvidencePeek(ctx, params.Profile, leaf, sampleIndex)
 	peekApp := EvidenceOutput{}
 	listApp := EvidenceOutput{}
 	if firstApp != "" {
-		peekApp = runEvidencePeek(ctx, params.Profile, firstApp)
+		peekApp = runEvidencePeek(ctx, params.Profile, firstApp, sampleIndex)
 		if params.RepoRoot != "" {
 			listApp = runEvidenceList(ctx, params.Profile, firstApp, params)
 		}
@@ -239,8 +282,8 @@ func firstAppFrame(stack []string, prefixes []string) string {
 	return ""
 }
 
-func runEvidencePeek(ctx context.Context, profilePath, symbol string) EvidenceOutput {
-	result, err := RunPeek(ctx, PeekParams{Profile: profilePath, Regex: symbol})
+func runEvidencePeek(ctx context.Context, profilePath, symbol, sampleIndex string) EvidenceOutput {
+	result, err := RunPeek(ctx, PeekParams{Profile: profilePath, Regex: symbol, SampleIndex: sampleIndex})
 	if err != nil {
 		return EvidenceOutput{}
 	}

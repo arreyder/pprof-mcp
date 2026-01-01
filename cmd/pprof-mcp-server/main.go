@@ -182,9 +182,10 @@ func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error)
 
 func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := pprof.RunPeek(ctx, pprof.PeekParams{
-		Profile: getString(args, "profile"),
-		Binary:  getString(args, "binary"),
-		Regex:   getString(args, "regex"),
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		Regex:       getString(args, "regex"),
+		SampleIndex: getString(args, "sample_index"),
 	})
 	if err != nil {
 		return nil, err
@@ -318,6 +319,7 @@ func pprofStorylinesTool(ctx context.Context, args map[string]any) (interface{},
 		RepoPrefixes: prefixes,
 		RepoRoot:     getString(args, "repo_root"),
 		TrimPath:     getString(args, "trim_path"),
+		SampleIndex:  getString(args, "sample_index"),
 	})
 	if err != nil {
 		return nil, err

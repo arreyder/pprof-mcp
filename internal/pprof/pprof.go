@@ -26,9 +26,10 @@ type TopResult struct {
 }
 
 type PeekParams struct {
-	Profile string
-	Binary  string
-	Regex   string
+	Profile     string
+	Binary      string
+	Regex       string
+	SampleIndex string
 }
 
 type PeekResult struct {
@@ -127,6 +128,9 @@ func RunPeek(ctx context.Context, params PeekParams) (PeekResult, error) {
 	}
 
 	pprofArgs := []string{"tool", "pprof", "-peek", params.Regex}
+	if params.SampleIndex != "" {
+		pprofArgs = append(pprofArgs, "-sample_index", params.SampleIndex)
+	}
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
