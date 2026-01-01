@@ -47,12 +47,24 @@ func GenerateProfileHints(profilePath string, usedSampleIndex string) []string {
 					"Showing allocation hot spots. Use pprof.alloc_paths for detailed allocation path analysis with filtering.")
 			}
 		}
+
+		// Suggest memory_sanity for heap profiles
+		hints = append(hints,
+			"Use pprof.memory_sanity to detect RSS vs heap mismatches (SQLite temp_store, CGO, high goroutine stacks).")
+
+		// Suggest storylines for comprehensive view
+		hints = append(hints,
+			"Use pprof.storylines for a high-level view of where allocations happen in your code.")
 	}
 
 	// CPU profile hints
 	if kind == "cpu" {
 		hints = append(hints,
 			"Use cum=true to sort by cumulative time (time in function + callees) to find top-level hot paths.")
+		hints = append(hints,
+			"Use pprof.storylines for a high-level view of hot code paths in your code.")
+		hints = append(hints,
+			"Use pprof.overhead_report to identify infrastructure/observability overhead.")
 	}
 
 	// Mutex/block profile hints
