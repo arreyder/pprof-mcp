@@ -144,10 +144,12 @@ datadog.profiles.compare_range service=X env=Y \
 | `pprof.top` | Show top functions by CPU/memory. Start here. Supports baseline comparisons. |
 | `pprof.peek` | Show callers and callees of a function. Use `sample_index=alloc_space` for heap! |
 | `pprof.list` | Line-level source annotation |
+| `pprof.trace_source` | Trace a hot function with source snippets and call chain context |
 | `pprof.discover` | End-to-end discovery analysis (downloads + analysis suite) |
 | `pprof.storylines` | Find hot code paths in YOUR repository. Auto-detects heap profiles. |
 | `pprof.alloc_paths` | **Analyze allocation paths** with rates (MB/min), filtering, caller chains |
 | `pprof.overhead_report` | **Detect observability overhead** - OTel, zap, gRPC, protobuf breakdown |
+| `pprof.explain_overhead` | Explain why an overhead category/function is expensive |
 | `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | **Detect RSS/heap mismatch** - SQLite, CGO, goroutine stack issues |
 | `pprof.goroutine_analysis` | Detect goroutine leaks and blocking patterns |
@@ -158,6 +160,9 @@ datadog.profiles.compare_range service=X env=Y \
 | `pprof.traces_head` | Raw stack traces |
 | `pprof.diff_top` | Compare two profiles (before/after) |
 | `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
+| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues |
+| `pprof.generate_report` | Generate a markdown report from structured tool outputs |
+| `pprof.vendor_analyze` | Analyze vendored/external dependencies in hot paths |
 | `pprof.meta` | Profile metadata (sample types, duration) |
 
 **Memory Sanity Tool** (`pprof.memory_sanity`):
@@ -218,6 +223,7 @@ pprof.top --profile <cpu.pprof> --cum --nodecount 20
 pprof.top --profile <cpu.pprof> --nodecount 20  # flat
 pprof.peek --profile <cpu.pprof> --regex <top_function>
 pprof.list --profile <cpu.pprof> --function <hot_function> --repo_root .
+pprof.trace_source --profile <cpu.pprof> --function <hot_function> --repo_root .
 ```
 
 ### 1.2) Heap / Allocation Pressure
@@ -240,6 +246,13 @@ pprof.contention_analysis --profile <mutex.pprof>
 ```
 pprof.traces_head --profile <goroutines.pprof> --lines 300
 pprof.goroutine_analysis --profile <goroutines.pprof>
+```
+
+### 1.5) Overhead + Dependencies
+```
+pprof.overhead_report --profile <cpu.pprof>
+pprof.explain_overhead --profile <cpu.pprof> --category "OpenTelemetry Tracing"
+pprof.vendor_analyze --profile <cpu.pprof> --repo_root . --min_pct 1.0
 ```
 
 ========================================================
@@ -273,6 +286,18 @@ datadog.function_history service=myservice env=prod function="hotFunction" hours
 
 # 6. Compare before/after a fix
 pprof.diff_top before=./profiles/baseline_cpu.pprof after=./profiles/current_cpu.pprof nodecount=20
+
+# 7. Trace source and explain overhead
+pprof.trace_source profile=./profiles/myservice_prod_cpu.pprof function="hotFunction" repo_root=.
+pprof.overhead_report profile=./profiles/myservice_prod_cpu.pprof
+pprof.explain_overhead profile=./profiles/myservice_prod_cpu.pprof category="OpenTelemetry Tracing"
+
+# 8. Analyze vendor hotspots and suggest a fix
+pprof.vendor_analyze profile=./profiles/myservice_prod_cpu.pprof repo_root=. min_pct=1.0
+pprof.suggest_fix profile=./profiles/myservice_prod_cpu.pprof issue="alloc_hotpath" repo_root=. output_format=structured
+
+# 9. Generate a markdown report from structured outputs
+pprof.generate_report title="Profiling Summary" inputs='[{"kind":"top","data":<pprof.top result>},{"kind":"overhead_report","data":<pprof.overhead_report result>}]'
 ```
 
 ========================================================
