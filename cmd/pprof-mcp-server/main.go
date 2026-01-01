@@ -611,6 +611,104 @@ func pprofHotspotSummaryTool(ctx context.Context, args map[string]any) (interfac
 	return marshalJSONWithSummary(summary, payload)
 }
 
+func pprofTraceSourceTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	showVendor := true
+	if _, ok := args["show_vendor"]; ok {
+		showVendor = getBool(args, "show_vendor")
+	}
+	result, err := pprof.RunTraceSource(pprof.TraceSourceParams{
+		Profile:      getString(args, "profile"),
+		Function:     getString(args, "function"),
+		RepoRoot:     getString(args, "repo_root"),
+		MaxDepth:     getInt(args, "max_depth", 0),
+		ShowVendor:   showVendor,
+		ContextLines: getInt(args, "context_lines", 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof trace_source",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Traced %d functions.", result.TotalFunctionsTraced)
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofVendorAnalyzeTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunVendorAnalyze(ctx, pprof.VendorAnalyzeParams{
+		Profile:      getString(args, "profile"),
+		RepoRoot:     getString(args, "repo_root"),
+		MinPct:       getFloat(args, "min_pct", 0),
+		CheckUpdates: getBool(args, "check_updates"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof vendor_analyze",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Found %d vendor hotspots.", len(result.VendorHotspots))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofExplainOverheadTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunExplainOverhead(ctx, pprof.ExplainOverheadParams{
+		Profile:     getString(args, "profile"),
+		Category:    getString(args, "category"),
+		Function:    getString(args, "function"),
+		DetailLevel: getString(args, "detail_level"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof explain_overhead",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Explanation generated for %s.", result.Category)
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofSuggestFixTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunSuggestFix(ctx, pprof.SuggestFixParams{
+		Profile:        getString(args, "profile"),
+		Issue:          getString(args, "issue"),
+		RepoRoot:       getString(args, "repo_root"),
+		TargetFunction: getString(args, "target_function"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof suggest_fix",
+		"result":  result,
+	}
+	outputFormat := strings.ToLower(strings.TrimSpace(getString(args, "output_format")))
+	if outputFormat == "diff" {
+		diff := ""
+		if len(result.ApplicableFixes) > 0 {
+			diff = result.ApplicableFixes[0].Diff
+		}
+		return ToolOutput{Text: diff, Structured: payload}, nil
+	}
+	if outputFormat == "pr_description" {
+		desc := ""
+		if len(result.ApplicableFixes) > 0 {
+			desc = result.ApplicableFixes[0].PRDescription
+		}
+		return ToolOutput{Text: desc, Structured: payload}, nil
+	}
+
+	summary := fmt.Sprintf("Generated %d fix suggestions.", len(result.ApplicableFixes))
+	return marshalJSONWithSummary(summary, payload)
+}
+
 func datadogProfilesListTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := datadog.ListProfiles(ctx, datadog.ListProfilesParams{
 		Service: getString(args, "service"),

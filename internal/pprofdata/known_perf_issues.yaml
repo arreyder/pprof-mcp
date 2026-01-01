@@ -1,0 +1,33 @@
+packages:
+  "google.golang.org/protobuf":
+    repo_url: "https://github.com/protocolbuffers/protobuf-go"
+    patterns:
+      - match: "protojson"
+        severity: high
+        issue: "protojson uses reflection, 5-10x slower than binary proto"
+        recommendation: "Use proto.Marshal/Unmarshal for performance-critical paths"
+      - match: "anypb.UnmarshalTo"
+        severity: medium
+        issue: "Any type requires type registry lookup for each message"
+        recommendation: "Consider using concrete types instead of Any"
+
+  "encoding/json":
+    patterns:
+      - match: "Unmarshal|Decode"
+        severity: medium
+        issue: "Standard library json uses reflection"
+        recommendation: "Consider json-iterator/go or code generation (easyjson)"
+
+  "github.com/klauspost/compress/zstd":
+    patterns:
+      - match: "Encode|Decode"
+        severity: low
+        issue: "Compression is CPU-intensive by nature"
+        recommendation: "Consider compression level trade-offs, use sync.Pool for encoders"
+
+  "database/sql":
+    patterns:
+      - match: "(*DB).Query|(*DB).Exec"
+        severity: medium
+        issue: "Connection pool contention or query preparation overhead"
+        recommendation: "Use prepared statements, tune pool size"

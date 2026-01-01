@@ -470,7 +470,7 @@ datadog.profiles.aggregate(
 
 These tools were identified during a temporal_sync profiling session where tracing the root cause (protojson in vendored baton-sdk) required manual file reading and grep searches.
 
-### 12. Add `pprof.trace_source` Tool
+### 12. [x] Add `pprof.trace_source` Tool
 
 **Effort:** High
 **Value:** Very High
@@ -571,7 +571,7 @@ func resolveSourceFile(frame StackFrame, repoRoot string) (string, error) {
 
 ---
 
-### 13. Add `pprof.vendor_analyze` Tool
+### 13. [x] Add `pprof.vendor_analyze` Tool
 
 **Effort:** Medium
 **Value:** High
@@ -685,7 +685,7 @@ packages:
 
 ---
 
-### 14. Add `pprof.explain_overhead` Tool
+### 14. [x] Add `pprof.explain_overhead` Tool
 
 **Effort:** Medium
 **Value:** High
@@ -848,7 +848,7 @@ functions:
 
 ---
 
-### 15. Add `pprof.suggest_fix` Tool
+### 15. [x] Add `pprof.suggest_fix` Tool
 
 **Effort:** High
 **Value:** Very High

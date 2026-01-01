@@ -1,0 +1,100 @@
+fixes:
+  protojson_to_binary:
+    issue_id: "protojson_overhead"
+    description: "Replace protojson with binary proto encoding"
+    applicable_when:
+      - "protojson appears in hot path with >10% CPU"
+      - "Binary proto is acceptable (not human-readable requirement)"
+    detection_patterns:
+      - "protojson.Marshal"
+      - "protojson.Unmarshal"
+      - "protojson.decoder"
+    template:
+      before: |
+        import "google.golang.org/protobuf/encoding/protojson"
+
+        func marshal(msg proto.Message) ([]byte, error) {
+            return protojson.Marshal(msg)
+        }
+
+        func unmarshal(b []byte, msg proto.Message) error {
+            return protojson.Unmarshal(b, msg)
+        }
+      after: |
+        import "google.golang.org/protobuf/proto"
+
+        func marshal(msg proto.Message) ([]byte, error) {
+            return proto.Marshal(msg)
+        }
+
+        func unmarshal(b []byte, msg proto.Message) error {
+            return proto.Unmarshal(b, msg)
+        }
+    considerations:
+      - "Binary proto is not human-readable for debugging"
+      - "Requires coordinated update if used in API/storage"
+      - "Consider content-type negotiation for backward compatibility"
+    expected_impact:
+      cpu_reduction: "40-60%"
+      allocation_reduction: "50-70%"
+    pr_template: |
+      ## Summary
+      Optimize {service} by switching from protojson to binary proto encoding.
+
+      ## Problem
+      Profile analysis shows protojson serialization consuming {overhead_pct}% of CPU time.
+
+      Top functions:
+      {top_functions}
+
+      ## Solution
+      Replace `protojson.Marshal/Unmarshal` with `proto.Marshal/Unmarshal`.
+
+      ## Expected Impact
+      - CPU reduction: 40-60%
+      - Allocation rate reduction: 50-70%
+
+      ## Testing
+      - [ ] Unit tests pass
+      - [ ] Integration tests pass
+      - [ ] Load test comparison before/after
+
+  sync_pool_for_allocations:
+    issue_id: "allocation_hot_spot"
+    description: "Use sync.Pool to reuse frequently allocated objects"
+    applicable_when:
+      - "Single type accounts for >5% of allocations"
+      - "Object is short-lived and frequently created"
+    detection_patterns:
+      - "new("
+      - "make("
+    template:
+      before: |
+        func process(data []byte) *Result {
+            result := &Result{}
+            // ... populate result
+            return result
+        }
+      after: |
+        var resultPool = sync.Pool{
+            New: func() interface{} {
+                return &Result{}
+            },
+        }
+
+        func process(data []byte) *Result {
+            result := resultPool.Get().(*Result)
+            result.Reset()
+            // ... populate result
+            return result
+        }
+
+        // Caller must return to pool when done:
+        // defer resultPool.Put(result)
+    considerations:
+      - "Caller must return objects to pool"
+      - "Objects must be safely resettable (implement Reset method)"
+      - "Don't pool objects that escape to other goroutines long-term"
+    expected_impact:
+      allocation_reduction: "50-80% for pooled type"
+      gc_reduction: "Proportional to allocation reduction"

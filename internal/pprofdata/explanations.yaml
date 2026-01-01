@@ -1,0 +1,91 @@
+categories:
+  "Protobuf Serialization":
+    brief: "Protocol buffer marshaling/unmarshaling overhead"
+    standard: |
+      Protobuf serialization appears as overhead due to:
+
+      1. Reflection: protojson and some proto operations use Go reflection
+         to access message fields dynamically, which is slow compared to
+         generated code.
+
+      2. Memory allocation: Each unmarshal creates new message objects.
+         Without pooling, this creates GC pressure.
+
+      3. Type resolution: google.protobuf.Any requires registry lookups
+         via protoregistry.GlobalTypes.FindMessageByURL() for every Any field.
+
+      4. String conversion: protojson parses/generates UTF-8 strings,
+         allocating for each string field.
+    detailed: |
+      Protobuf serialization overhead combines reflection, allocation pressure,
+      and type registry lookups. JSON encoding is particularly expensive
+      because it uses reflection and string conversions for each field.
+    common_causes:
+      - "Using protojson instead of binary proto"
+      - "Excessive use of google.protobuf.Any wrappers"
+      - "Not reusing message objects with Reset()"
+      - "Large messages with many fields"
+    optimization_strategies:
+      - strategy: "Switch to binary proto"
+        impact: "5-10x faster serialization"
+        effort: "medium"
+        description: "Replace protojson.Marshal/Unmarshal with proto.Marshal/Unmarshal"
+      - strategy: "Use message pools"
+        impact: "2-3x faster, reduces GC"
+        effort: "low"
+        description: "Use sync.Pool to reuse message objects"
+      - strategy: "Avoid Any types"
+        impact: "Eliminates type registry lookups"
+        effort: "high"
+        description: "Use concrete types or oneof instead of Any"
+
+  "Runtime/GC":
+    brief: "Go garbage collection overhead"
+    standard: |
+      High GC overhead indicates memory allocation pressure:
+
+      1. Allocation rate: Creating many short-lived objects triggers
+         frequent GC cycles. Each cycle pauses goroutines for marking.
+
+      2. Heap size: Larger heaps take longer to scan. GC work is
+         proportional to live heap size.
+
+      3. Pointer-heavy structures: Maps, slices of pointers, and
+         linked structures require more GC scanning than flat data.
+    common_causes:
+      - "High allocation rate in request handlers"
+      - "Pointer-heavy data structures"
+      - "Large temporary slices or maps"
+    optimization_strategies:
+      - strategy: "Reduce allocations with sync.Pool"
+        impact: "20-50% GC reduction"
+        effort: "low"
+        description: "Pool frequently allocated objects"
+      - strategy: "Pre-allocate slices"
+        impact: "Reduces slice growth allocations"
+        effort: "low"
+        description: "Use make([]T, 0, n) when size is known"
+      - strategy: "Use GOGC tuning"
+        impact: "Trade memory for CPU"
+        effort: "low"
+        description: "Set GOGC=200 to run GC less frequently"
+
+functions:
+  "protojson.decoder.unmarshalAny":
+    category: "Protobuf Serialization"
+    explanation: |
+      This function unmarshals google.protobuf.Any messages from JSON.
+
+      It's slow because it must:
+      1. Parse the @type URL string from JSON
+      2. Look up the message type in protoregistry.GlobalTypes
+      3. Create a new instance of that type via reflection
+      4. Recursively unmarshal the nested message
+
+      The type registry lookup alone requires string parsing and map
+      lookups for every Any field in the message tree.
+    why_expensive: "Type registry lookup plus reflection-based instantiation"
+    alternatives:
+      - "Use concrete types instead of Any"
+      - "Use binary proto encoding (avoids JSON parsing entirely)"
+      - "If Any is required, consider caching resolved types"
