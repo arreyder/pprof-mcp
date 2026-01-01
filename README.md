@@ -163,7 +163,7 @@ Or run from source:
 | `pprof.hotspot_summary` | Top hotspots across profile types in one call |
 | `pprof.diff_top` | Compare two profiles |
 | `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
-| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues |
+| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues (deprecated) |
 | `pprof.generate_report` | Generate a markdown report from structured tool outputs |
 | `pprof.vendor_analyze` | Analyze vendored/external dependencies in hot paths |
 | `pprof.focus_paths` | Show all call paths to a function |
