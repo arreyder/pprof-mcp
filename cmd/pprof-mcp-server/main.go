@@ -16,6 +16,7 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/arreyder/pprof-mcp/internal/d2"
 	"github.com/arreyder/pprof-mcp/internal/datadog"
 	"github.com/arreyder/pprof-mcp/internal/pprof"
 	"github.com/arreyder/pprof-mcp/internal/profiles"
@@ -143,6 +144,125 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	// Detect environment
+	isD2 := d2.IsD2Environment()
+
+	if isD2 {
+		// D2 mode - use local kubectl download
+		service := getString(args, "service")
+		outDir := getString(args, "out_dir")
+		seconds := getInt(args, "seconds", 30)
+
+		result, err := d2.DownloadProfiles(ctx, d2.DownloadParams{
+			Service: service,
+			OutDir:  outDir,
+			Seconds: seconds,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("d2 download failed: %w", err)
+		}
+
+		// Register profile handles
+		timestamp := time.Now().UTC().Format(time.RFC3339)
+		handles := []map[string]any{}
+		for _, file := range result.Files {
+			handle, err := profileRegistry.Register(profiles.Metadata{
+				Service:   result.Service,
+				Env:       "d2",
+				Type:      file.Type,
+				Timestamp: timestamp,
+				Path:      file.Path,
+				Bytes:     file.Bytes,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to register profile handle: %w", err)
+			}
+			handles = append(handles, map[string]any{
+				"type":   file.Type,
+				"handle": handle,
+				"bytes":  file.Bytes,
+			})
+		}
+
+		resultPayload := map[string]any{
+			"service":   result.Service,
+			"namespace": result.Namespace,
+			"pod_name":  result.PodName,
+			"pod_ip":    result.PodIP,
+			"files":     handles,
+		}
+		if len(result.Warnings) > 0 {
+			resultPayload["warnings"] = result.Warnings
+		}
+
+		payload := map[string]any{
+			"command": fmt.Sprintf("kubectl port-forward -n %s %s 1337:1337 (d2 mode)", result.Namespace, result.PodName),
+			"mode":    "d2",
+			"result":  resultPayload,
+		}
+		return marshalJSON(payload)
+	}
+
+	// Datadog mode - use Datadog API
+	service := getString(args, "service")
+	env := getString(args, "env")
+	if env == "" {
+		return nil, fmt.Errorf("env parameter required for Datadog mode (not in d2 environment)")
+	}
+	outDir := getString(args, "out_dir")
+	hours := getInt(args, "hours", 72)
+	site := getString(args, "dd_site")
+	if site == "" {
+		site = getString(args, "site")
+	}
+	profileID := getString(args, "profile_id")
+	eventID := getString(args, "event_id")
+
+	result, err := datadog.DownloadLatestBundle(ctx, datadog.DownloadParams{
+		Service:   service,
+		Env:       env,
+		OutDir:    outDir,
+		Site:      site,
+		Hours:     hours,
+		ProfileID: profileID,
+		EventID:   eventID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("datadog download failed: %w", err)
+	}
+
+	bundle, err := registerBundleHandles(result)
+	if err != nil {
+		return nil, err
+	}
+
+	resultPayload := map[string]any{
+		"service":    result.Service,
+		"env":        result.Env,
+		"dd_site":    result.DDSite,
+		"from_ts":    result.FromTS,
+		"to_ts":      result.ToTS,
+		"profile_id": result.ProfileID,
+		"event_id":   result.EventID,
+		"timestamp":  result.Timestamp,
+		"files":      bundle.Handles,
+	}
+	if result.MetricsPath != "" {
+		resultPayload["metrics_path"] = result.MetricsPath
+	}
+	if len(result.Warnings) > 0 {
+		resultPayload["warnings"] = result.Warnings
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("%s (datadog mode)", buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID)),
+		"mode":    "datadog",
+		"result":  resultPayload,
+	}
+	return marshalJSON(payload)
+}
+
 func downloadTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	service := getString(args, "service")
 	env := getString(args, "env")
@@ -193,6 +313,60 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 
 	payload := map[string]any{
 		"command": buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID),
+		"result":  resultPayload,
+	}
+	return marshalJSON(payload)
+}
+
+func d2DownloadTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	service := getString(args, "service")
+	outDir := getString(args, "out_dir")
+	seconds := getInt(args, "seconds", 30)
+
+	result, err := d2.DownloadProfiles(ctx, d2.DownloadParams{
+		Service: service,
+		OutDir:  outDir,
+		Seconds: seconds,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register profile handles similar to datadog download
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	handles := []map[string]any{}
+	for _, file := range result.Files {
+		handle, err := profileRegistry.Register(profiles.Metadata{
+			Service:   result.Service,
+			Env:       "d2",
+			Type:      file.Type,
+			Timestamp: timestamp,
+			Path:      file.Path,
+			Bytes:     file.Bytes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to register profile handle: %w", err)
+		}
+		handles = append(handles, map[string]any{
+			"type":   file.Type,
+			"handle": handle,
+			"bytes":  file.Bytes,
+		})
+	}
+
+	resultPayload := map[string]any{
+		"service":   result.Service,
+		"namespace": result.Namespace,
+		"pod_name":  result.PodName,
+		"pod_ip":    result.PodIP,
+		"files":     handles,
+	}
+	if len(result.Warnings) > 0 {
+		resultPayload["warnings"] = result.Warnings
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("kubectl port-forward -n %s %s 1337:1337", result.Namespace, result.PodName),
 		"result":  resultPayload,
 	}
 	return marshalJSON(payload)
