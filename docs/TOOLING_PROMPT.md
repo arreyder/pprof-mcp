@@ -160,7 +160,7 @@ datadog.profiles.compare_range service=X env=Y \
 | `pprof.traces_head` | Raw stack traces |
 | `pprof.diff_top` | Compare two profiles (before/after) |
 | `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
-| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues |
+| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues (deprecated) |
 | `pprof.generate_report` | Generate a markdown report from structured tool outputs |
 | `pprof.vendor_analyze` | Analyze vendored/external dependencies in hot paths |
 | `pprof.meta` | Profile metadata (sample types, duration) |
@@ -292,7 +292,7 @@ pprof.trace_source profile=./profiles/myservice_prod_cpu.pprof function="hotFunc
 pprof.overhead_report profile=./profiles/myservice_prod_cpu.pprof
 pprof.explain_overhead profile=./profiles/myservice_prod_cpu.pprof category="OpenTelemetry Tracing"
 
-# 8. Analyze vendor hotspots and suggest a fix
+# 8. Analyze vendor hotspots and suggest a fix (deprecated)
 pprof.vendor_analyze profile=./profiles/myservice_prod_cpu.pprof repo_root=. min_pct=1.0
 pprof.suggest_fix profile=./profiles/myservice_prod_cpu.pprof issue="alloc_hotpath" repo_root=. output_format=structured
 

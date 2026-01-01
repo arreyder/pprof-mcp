@@ -404,6 +404,8 @@ func ToolSchemas() []ToolDefinition {
 				Name: "pprof.suggest_fix",
 				Description: `Suggest concrete fixes based on profile analysis and issue type.
 
+**Deprecated**: This tool is being phased out; prefer `pprof.vendor_analyze` + manual fixes.
+
 **When to use**: Generate actionable patches and PR descriptions for known performance issues.
 
 **Returns**: Suggested fixes, diffs, and next steps.`,
