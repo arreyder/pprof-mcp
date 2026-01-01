@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/pprof/profile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/arreyder/pprof-mcp/internal/datadog"
@@ -158,24 +159,33 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 }
 
 func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+	sampleIndex := getString(args, "sample_index")
+
 	result, err := pprof.RunTop(ctx, pprof.TopParams{
-		Profile:     getString(args, "profile"),
+		Profile:     profilePath,
 		Binary:      getString(args, "binary"),
 		Cum:         getBool(args, "cum"),
 		NodeCount:   getInt(args, "nodecount", 0),
 		Focus:       getString(args, "focus"),
 		Ignore:      getString(args, "ignore"),
-		SampleIndex: getString(args, "sample_index"),
+		SampleIndex: sampleIndex,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	// Add contextual hints based on profile type
+	pprof.AddTopHints(&result, profilePath, sampleIndex)
 
 	payload := map[string]any{
 		"command": result.Command,
 		"raw":     result.Raw,
 		"rows":    result.Rows,
 		"summary": result.Summary,
+	}
+	if len(result.Hints) > 0 {
+		payload["hints"] = result.Hints
 	}
 	return marshalJSON(payload)
 }
@@ -642,6 +652,101 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 	}
 	summary := fmt.Sprintf("Function %s found in %d/%d profiles.", result.Function, result.Summary.FoundInProfiles, result.Summary.TotalProfiles)
 	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofAllocPathsTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunAllocPaths(pprof.AllocPathsParams{
+		Profile:       getString(args, "profile"),
+		MinPercent:    getFloat(args, "min_percent", 1.0),
+		MaxPaths:      getInt(args, "max_paths", 20),
+		RepoPrefixes:  parseStringList(args, "repo_prefix"),
+		GroupBySource: getBool(args, "group_by_source"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof alloc_paths",
+		"result":  result,
+	}
+	if len(result.Warnings) > 0 {
+		payload["warnings"] = result.Warnings
+	}
+	summary := fmt.Sprintf("Analyzed %s total allocations, found %d allocation paths above threshold.",
+		result.TotalAllocStr, len(result.Paths))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofOverheadReportTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+
+	prof, err := loadProfile(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
+
+	// Find sample index
+	sampleIndex := 0
+	if si := getString(args, "sample_index"); si != "" {
+		for i, st := range prof.SampleType {
+			if st.Type == si {
+				sampleIndex = i
+				break
+			}
+		}
+	}
+
+	result := pprof.DetectOverhead(prof, sampleIndex)
+
+	payload := map[string]any{
+		"command": "pprof overhead_report",
+		"result":  result,
+	}
+
+	// Generate hints for high-overhead categories
+	hints := pprof.GenerateOverheadHints(result)
+	if len(hints) > 0 {
+		payload["hints"] = hints
+	}
+
+	summary := fmt.Sprintf("Total observability overhead: %.1f%% (%d categories detected)",
+		result.TotalOverhead, len(result.Detections))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofDetectRepoTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+
+	prof, err := loadProfile(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
+
+	result := pprof.DetectRepoFromProfile(prof)
+
+	payload := map[string]any{
+		"command": "pprof detect_repo",
+		"result":  result,
+	}
+
+	var summary string
+	if result.DetectedRoot != "" {
+		summary = fmt.Sprintf("Detected local repo at %s (confidence: %s)", result.DetectedRoot, result.Confidence)
+	} else {
+		summary = fmt.Sprintf("Found %d module paths but no local repo match", len(result.ModulePaths))
+	}
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func loadProfile(path string) (*profile.Profile, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	return profile.Parse(file)
 }
 
 func getString(args map[string]any, key string) string {

@@ -23,6 +23,7 @@ type TopResult struct {
 	Raw     string                `json:"raw"`
 	Rows    []pprofparse.TopRow   `json:"rows"`
 	Summary pprofparse.TopSummary `json:"summary"`
+	Hints   []string              `json:"hints,omitempty"` // Contextual hints based on profile type
 }
 
 type PeekParams struct {

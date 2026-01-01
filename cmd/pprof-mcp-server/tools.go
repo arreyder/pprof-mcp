@@ -541,6 +541,78 @@ func ToolSchemas() []ToolDefinition {
 			},
 			Handler: functionHistoryTool,
 		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.alloc_paths",
+				Description: `Analyze allocation paths in a heap profile with intelligent filtering.
+
+**When to use**: When pprof.top shows high allocations but you need to understand:
+- Where allocations originate in YOUR code (not runtime)
+- Allocation rates (MB/min) not just totals
+- Grouped by source location for cleaner output
+
+**Key options**:
+- min_percent: Filter out paths below this threshold (default: 1%)
+- max_paths: Limit number of paths returned (default: 20)
+- repo_prefix: Focus on your code (auto-detected if not specified)
+
+**Returns**: Allocation paths sorted by size, with caller chains and rates.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":         ProfilePath(),
+					"min_percent":     numberProp("Minimum allocation percentage to include (default: 1.0)", floatPtr(0), floatPtr(100)),
+					"max_paths":       integerProp("Maximum paths to return (default: 20)", intPtr(1), nil),
+					"repo_prefix":     arrayOrStringPropSchema(prop("string", "Repository prefix"), "Filter to paths containing these prefixes (auto-detected if not specified)"),
+					"group_by_source": prop("boolean", "Group by first app frame instead of allocation site (default: false)"),
+				}, "profile"),
+			},
+			Handler: pprofAllocPathsTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.overhead_report",
+				Description: `Detect observability and infrastructure overhead in a profile.
+
+**When to use**: To understand how much of your CPU/memory is spent on:
+- OpenTelemetry tracing
+- Logging (zap, logrus)
+- Prometheus metrics
+- gRPC/protobuf overhead
+- JSON serialization
+- Runtime/GC
+
+**Returns**:
+- Breakdown by category with percentages
+- Top functions per category
+- Severity ratings (low/medium/high)
+- Actionable suggestions for high-overhead categories
+
+**Example insight**: "OpenTelemetry Tracing: 13% - Consider reducing trace sampling rate"`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"sample_index": prop("string", "Sample index to analyze (auto-detected based on profile type)"),
+				}, "profile"),
+			},
+			Handler: pprofOverheadReportTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.detect_repo",
+				Description: `Auto-detect repository information from a profile.
+
+**When to use**: To find the local repo root for source annotation without manual configuration.
+
+**How it works**:
+1. Extracts Go module paths from function names in the profile
+2. Searches common locations for matching local repos
+3. Validates by checking for go.mod or project structure
+
+**Returns**: Detected module paths, local repo root (if found), and confidence level.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+				}, "profile"),
+			},
+			Handler: pprofDetectRepoTool,
+		},
 	}
 	return tools
 }
