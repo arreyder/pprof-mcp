@@ -99,6 +99,7 @@ func ListProfiles(ctx context.Context, params ListProfilesParams) (ListProfilesR
 }
 
 // parseRelativeOrAbsoluteTime parses a time string that can be:
+// - now: current time
 // - relative: "-1h", "-30m", "-2h30m" (negative duration from now)
 // - absolute: RFC3339 format like "2025-12-31T19:00:00Z"
 // Returns the parsed time formatted as RFC3339.
@@ -106,6 +107,9 @@ func parseRelativeOrAbsoluteTime(value string, defaultTime time.Time) (string, e
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return defaultTime.UTC().Format(time.RFC3339), nil
+	}
+	if strings.EqualFold(value, "now") {
+		return time.Now().UTC().Format(time.RFC3339), nil
 	}
 
 	// Check if it's a relative time (starts with - or +)

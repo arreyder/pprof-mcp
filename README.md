@@ -89,6 +89,8 @@ Add to your Claude config:
 **Linux**: `~/.config/Claude/claude_desktop_config.json`
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
+Optional safety: set `PPROF_MCP_BASEDIR` to restrict file reads/writes to a base directory (paths are cleaned and must stay within this directory).
+
 ```json
 {
   "mcpServers": {
@@ -129,7 +131,7 @@ Or run from source:
 |------|-------------|
 | `profiles.download_latest_bundle` | Download profile bundle from Datadog |
 | `datadog.profiles.list` | List available profiles (supports relative times like `-3h`) |
-| `datadog.profiles.pick` | Select profile by strategy (latest, oldest, closest, index, **anomaly**) |
+| `datadog.profiles.pick` | Select profile by strategy (latest, oldest, closest_to_ts, manual_index, most_samples, **anomaly**) |
 | `datadog.profiles.compare_range` | Compare profiles from two time ranges (before/after deployment) |
 | `datadog.profiles.near_event` | Find profiles around a specific event (OOM, restart, incident) |
 | `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container) |
@@ -150,6 +152,11 @@ Or run from source:
 | `pprof.tags` | Filter by tags or list available tags |
 | `pprof.merge` | Merge multiple profiles |
 | `pprof.meta` | Extract profile metadata |
+
+Notes:
+- `pprof.peek`, `pprof.list`, `pprof.tags`, and `pprof.focus_paths` accept an optional `max_lines` argument to cap output size.
+- `pprof.traces_head` accepts `max_lines` as an alias for `lines`.
+- `profiles.download_latest_bundle` accepts `site` or `dd_site` (alias) for Datadog site selection.
 
 ### Visualization
 

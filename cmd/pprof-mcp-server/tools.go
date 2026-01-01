@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -16,34 +15,9 @@ type ToolDefinition struct {
 	Handler ToolHandler
 }
 
-// Helper to create JSON schema property
-func prop(typ, desc string) json.RawMessage {
-	p := map[string]string{"type": typ, "description": desc}
-	data, _ := json.Marshal(p)
-	return data
-}
-
-// Helper to create enum property
-func enumProp(typ, desc string, values []string) json.RawMessage {
-	p := map[string]any{"type": typ, "description": desc, "enum": values}
-	data, _ := json.Marshal(p)
-	return data
-}
-
-// Helper to create array property
-func arrayProp(itemType, desc string) json.RawMessage {
-	p := map[string]any{
-		"type":        "array",
-		"description": desc,
-		"items":       map[string]string{"type": itemType},
-	}
-	data, _ := json.Marshal(p)
-	return data
-}
-
 // ToolSchemas returns all tool definitions.
 func ToolSchemas() []ToolDefinition {
-	return []ToolDefinition{
+	tools := []ToolDefinition{
 		{
 			Tool: &mcp.Tool{
 				Name: "profiles.download_latest_bundle",
@@ -57,19 +31,17 @@ func ToolSchemas() []ToolDefinition {
 3. Use this tool with the profile_id and event_id to download
 
 **Returns**: Paths to downloaded .pprof files for use with other pprof.* tools.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service":    prop("string", "The service name to download profiles for (required)"),
-						"env":        prop("string", "The environment (e.g., prod, staging) (required)"),
-						"out_dir":    prop("string", "Output directory for downloaded profiles (required)"),
-						"hours":      prop("integer", "Number of hours to look back for profiles (default: 72)"),
-						"dd_site":    prop("string", "Datadog site (e.g., datadoghq.com, datadoghq.eu)"),
-						"profile_id": prop("string", "Specific profile ID to download (use with event_id)"),
-						"event_id":   prop("string", "Specific event ID to download (required if profile_id is set)"),
-					},
-					"required": []string{"service", "env", "out_dir"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":    prop("string", "The service name to download profiles for (required)"),
+					"env":        prop("string", "The environment (e.g., prod, staging) (required)"),
+					"out_dir":    prop("string", "Output directory for downloaded profiles (required)"),
+					"hours":      integerProp("Number of hours to look back for profiles (default: 72)", intPtr(0), nil),
+					"dd_site":    prop("string", "Datadog site (e.g., datadoghq.com, datadoghq.eu) (alias: site)"),
+					"site":       prop("string", "Datadog site (preferred; alias: dd_site)"),
+					"profile_id": prop("string", "Specific profile ID to download (use with event_id)"),
+					"event_id":   prop("string", "Specific event ID to download (required if profile_id is set)"),
+				}, "service", "env", "out_dir"),
+				OutputSchema: downloadLatestBundleOutputSchema(),
 			},
 			Handler: downloadTool,
 		},
@@ -87,19 +59,16 @@ func ToolSchemas() []ToolDefinition {
 - focus: Filter to functions matching regex (e.g., "mypackage")
 
 **Returns**: Structured data with function names, flat/cumulative values, and percentages.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
-						"nodecount":    prop("integer", "Maximum number of nodes to show (default: 10)"),
-						"focus":        prop("string", "Regex to focus on specific functions"),
-						"ignore":       prop("string", "Regex to ignore specific functions"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
-					},
-					"required": []string{"profile"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"binary":       BinaryPathOptional(),
+					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
+					"nodecount":    integerProp("Maximum number of nodes to show (default: 10)", intPtr(0), nil),
+					"focus":        prop("string", "Regex to focus on specific functions"),
+					"ignore":       prop("string", "Regex to ignore specific functions"),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
+				}, "profile"),
+				OutputSchema: pprofTopOutputSchema(),
 			},
 			Handler: pprofTopTool,
 		},
@@ -112,16 +81,15 @@ func ToolSchemas() []ToolDefinition {
 - Who calls this function (callers)
 - What functions it calls (callees)
 
-**Example**: If pprof.top shows "json.Unmarshal" is hot, use peek to see which of YOUR functions call it.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile": prop("string", "Path to the pprof profile file (required)"),
-						"binary":  prop("string", "Path to the binary for symbol resolution"),
-						"regex":   prop("string", "Regex pattern to match function names (required)"),
-					},
-					"required": []string{"profile", "regex"},
-				},
+**Example**: If pprof.top shows "json.Unmarshal" is hot, use peek to see which of YOUR functions call it.
+
+**Optional**: Use max_lines to cap the output size.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":   ProfilePath(),
+					"binary":    BinaryPathOptional(),
+					"regex":     prop("string", "Regex pattern to match function names (required)"),
+					"max_lines": integerProp("Maximum number of output lines to return", intPtr(0), nil),
+				}, "profile", "regex"),
 			},
 			Handler: pprofPeekTool,
 		},
@@ -134,19 +102,18 @@ func ToolSchemas() []ToolDefinition {
 
 **Requirements**: Source code must be available. Use repo_root to specify where sources are located.
 
-**Example output**: Shows each line with CPU time, helping pinpoint the exact bottleneck.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"function":     prop("string", "Function name or regex to list source for (required)"),
-						"repo_root":    prop("string", "Repository root path for source file resolution"),
-						"trim_path":    prop("string", "Path prefix to trim from source file paths (default: /xsrc)"),
-						"source_paths": arrayProp("string", "Additional source paths for vendored or external dependencies"),
-					},
-					"required": []string{"profile", "function"},
-				},
+**Example output**: Shows each line with CPU time, helping pinpoint the exact bottleneck.
+
+**Optional**: Use max_lines to cap the output size.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"binary":       BinaryPathOptional(),
+					"function":     prop("string", "Function name or regex to list source for (required)"),
+					"repo_root":    prop("string", "Repository root path for source file resolution"),
+					"trim_path":    prop("string", "Path prefix to trim from source file paths (default: /xsrc)"),
+					"source_paths": arrayOrStringPropSchema(prop("string", "Source path"), "Additional source paths for vendored or external dependencies (string or list)"),
+					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+				}, "profile", "function"),
 			},
 			Handler: pprofListTool,
 		},
@@ -157,16 +124,13 @@ func ToolSchemas() []ToolDefinition {
 
 **When to use**: To see the actual call stacks that were sampled. Useful for understanding the full execution context.
 
-**Note**: Output can be large; use 'lines' parameter to limit.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile": prop("string", "Path to the pprof profile file (required)"),
-						"binary":  prop("string", "Path to the binary for symbol resolution"),
-						"lines":   prop("integer", "Maximum number of lines to return (default: 200)"),
-					},
-					"required": []string{"profile"},
-				},
+**Note**: Output can be large; use 'lines' (or alias 'max_lines') to limit.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":   ProfilePath(),
+					"binary":    BinaryPathOptional(),
+					"lines":     integerProp("Maximum number of lines to return (default: 200)", intPtr(0), intPtr(maxTracesLines)),
+					"max_lines": integerProp("Alias for lines", intPtr(0), intPtr(maxTracesLines)),
+				}, "profile"),
 			},
 			Handler: pprofTracesTool,
 		},
@@ -186,20 +150,16 @@ func ToolSchemas() []ToolDefinition {
 3. Use this tool with 'before' and 'after' paths
 
 **Returns**: Delta showing which functions improved/regressed and by how much.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"before":       prop("string", "Path to the baseline pprof profile (required)"),
-						"after":        prop("string", "Path to the comparison pprof profile (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
-						"nodecount":    prop("integer", "Maximum number of nodes to show"),
-						"focus":        prop("string", "Regex to focus on specific functions"),
-						"ignore":       prop("string", "Regex to ignore specific functions"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
-					},
-					"required": []string{"before", "after"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"before":       prop("string", "Path to the baseline pprof profile (required)"),
+					"after":        prop("string", "Path to the comparison pprof profile (required)"),
+					"binary":       BinaryPathOptional(),
+					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
+					"nodecount":    integerProp("Maximum number of nodes to show", intPtr(0), nil),
+					"focus":        prop("string", "Regex to focus on specific functions"),
+					"ignore":       prop("string", "Regex to ignore specific functions"),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
+				}, "before", "after"),
 			},
 			Handler: pprofDiffTool,
 		},
@@ -207,13 +167,9 @@ func ToolSchemas() []ToolDefinition {
 			Tool: &mcp.Tool{
 				Name:        "pprof.meta",
 				Description: "Extract metadata from a pprof profile including sample types, duration, drop frames, and comments. Useful for understanding what data is available in a profile.",
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile": prop("string", "Path to the pprof profile file (required)"),
-					},
-					"required": []string{"profile"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+				}, "profile"),
 			},
 			Handler: pprofMetaTool,
 		},
@@ -229,19 +185,15 @@ func ToolSchemas() []ToolDefinition {
 - n: Number of storylines to return (default: 4)
 
 **Returns**: The most expensive execution paths with source-level detail, filtered to your repository code.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":     prop("string", "Path to the pprof profile file (required)"),
-						"n":           prop("integer", "Number of storylines to return (default: 4)"),
-						"focus":       prop("string", "Regex to focus on specific functions"),
-						"ignore":      prop("string", "Regex to ignore specific functions"),
-						"repo_prefix": arrayProp("string", "Repository path prefixes to identify your code (e.g., github.com/myorg/myrepo)"),
-						"repo_root":   prop("string", "Local repository root path for source file resolution"),
-						"trim_path":   prop("string", "Path prefix to trim from source file paths"),
-					},
-					"required": []string{"profile"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":     ProfilePath(),
+					"n":           integerProp("Number of storylines to return (default: 4)", intPtr(0), nil),
+					"focus":       prop("string", "Regex to focus on specific functions"),
+					"ignore":      prop("string", "Regex to ignore specific functions"),
+					"repo_prefix": arrayOrStringPropSchema(prop("string", "Repository prefix"), "Repository path prefixes to identify your code (e.g., github.com/myorg/myrepo) (string or list)"),
+					"repo_root":   prop("string", "Local repository root path for source file resolution"),
+					"trim_path":   prop("string", "Path prefix to trim from source file paths"),
+				}, "profile"),
 			},
 			Handler: pprofStorylinesTool,
 		},
@@ -264,16 +216,12 @@ func ToolSchemas() []ToolDefinition {
 - Actionable recommendations (GODEBUG settings, pragma changes)
 
 **Example use case**: Container OOM but heap profile shows only 124MB. This tool identifies likely causes like temp_store=MEMORY.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"heap_profile":      prop("string", "Path to heap profile file (required)"),
-						"goroutine_profile": prop("string", "Optional path to goroutine profile for stack analysis"),
-						"binary":            prop("string", "Path to binary for symbol resolution"),
-						"container_rss_mb":  prop("integer", "Container RSS in MB for mismatch detection"),
-					},
-					"required": []string{"heap_profile"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"heap_profile":      prop("string", "Path to heap profile file (required)"),
+					"goroutine_profile": prop("string", "Optional path to goroutine profile for stack analysis"),
+					"binary":            BinaryPathOptional(),
+					"container_rss_mb":  integerProp("Container RSS in MB for mismatch detection", intPtr(0), nil),
+				}, "heap_profile"),
 			},
 			Handler: pprofMemorySanityTool,
 		},
@@ -291,19 +239,16 @@ func ToolSchemas() []ToolDefinition {
   - Absolute: "2025-01-15T10:00:00Z" (RFC3339)
 
 **Returns**: List of profile candidates with timestamps, profile_id, and event_id.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service": prop("string", "The service name to list profiles for (required)"),
-						"env":     prop("string", "The environment (e.g., prod, staging) (required)"),
-						"from":    prop("string", "Start time (RFC3339 or relative like '-1h', '-24h')"),
-						"to":      prop("string", "End time (RFC3339 or relative)"),
-						"hours":   prop("integer", "Number of hours to look back (default: 72, ignored if from/to set)"),
-						"limit":   prop("integer", "Maximum number of profiles to return (default: 50)"),
-						"site":    prop("string", "Datadog site (e.g., datadoghq.com)"),
-					},
-					"required": []string{"service", "env"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service": prop("string", "The service name to list profiles for (required)"),
+					"env":     prop("string", "The environment (e.g., prod, staging) (required)"),
+					"from":    prop("string", "Start time (RFC3339 or relative like '-1h', '-24h')"),
+					"to":      prop("string", "End time (RFC3339 or relative)"),
+					"hours":   integerProp("Number of hours to look back (default: 72, ignored if from/to set)", intPtr(0), nil),
+					"limit":   integerProp("Maximum number of profiles to return (default: 50)", intPtr(0), nil),
+					"site":    prop("string", "Datadog site (e.g., datadoghq.com)"),
+				}, "service", "env"),
+				OutputSchema: datadogProfilesListOutputSchema(),
 			},
 			Handler: datadogProfilesListTool,
 		},
@@ -315,8 +260,9 @@ func ToolSchemas() []ToolDefinition {
 **Strategies**:
 - latest (default): Most recent profile
 - oldest: Oldest profile in range (useful for before/after comparisons)
-- closest: Profile closest to target_ts (requires target_ts parameter)
-- index: Specific index from list (requires index parameter, 0-based)
+- closest_to_ts: Profile closest to target_ts (requires target_ts parameter)
+- manual_index: Specific index from list (requires index parameter, 0-based)
+- most_samples: Profile with the highest sample count (falls back to latest if unavailable)
 - anomaly: Profile with highest statistical deviation (z-score > 2σ on CPU/memory/goroutine metrics)
 
 **Workflow for before/after comparison**:
@@ -329,22 +275,19 @@ func ToolSchemas() []ToolDefinition {
 1. Pick anomalous profile: strategy="anomaly" to find outliers
 2. Download with profiles.download_latest_bundle using the profile_id
 3. Analyze with pprof.top or pprof.storylines`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service":   prop("string", "The service name (required)"),
-						"env":       prop("string", "The environment (required)"),
-						"from":      prop("string", "Start time (RFC3339 or relative like '-3h')"),
-						"to":        prop("string", "End time (RFC3339 or relative)"),
-						"hours":     prop("integer", "Number of hours to look back (default: 72)"),
-						"limit":     prop("integer", "Maximum profiles to consider (default: 50)"),
-						"site":      prop("string", "Datadog site"),
-						"strategy":  enumProp("string", "Selection strategy: latest (default), oldest, closest (needs target_ts), index (needs index), anomaly (finds outliers)", []string{"latest", "oldest", "closest", "index", "anomaly"}),
-						"target_ts": prop("string", "Target timestamp for 'closest' strategy (RFC3339)"),
-						"index":     prop("integer", "Index for 'index' strategy (0-based from list results)"),
-					},
-					"required": []string{"service", "env"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":   prop("string", "The service name (required)"),
+					"env":       prop("string", "The environment (required)"),
+					"from":      prop("string", "Start time (RFC3339 or relative like '-3h')"),
+					"to":        prop("string", "End time (RFC3339 or relative)"),
+					"hours":     integerProp("Number of hours to look back (default: 72)", intPtr(0), nil),
+					"limit":     integerProp("Maximum profiles to consider (default: 50)", intPtr(0), nil),
+					"site":      prop("string", "Datadog site"),
+					"strategy":  enumProp("string", "Selection strategy: latest (default), oldest, closest_to_ts (needs target_ts), manual_index (needs index), most_samples, anomaly (finds outliers)", []string{"latest", "oldest", "closest_to_ts", "manual_index", "most_samples", "anomaly"}),
+					"target_ts": prop("string", "Target timestamp for 'closest_to_ts' strategy (RFC3339)"),
+					"index":     integerProp("Index for 'manual_index' strategy (0-based from list results)", intPtr(0), nil),
+				}, "service", "env"),
+				OutputSchema: datadogProfilesPickOutputSchema(),
 			},
 			Handler: datadogProfilesPickTool,
 		},
@@ -352,13 +295,9 @@ func ToolSchemas() []ToolDefinition {
 			Tool: &mcp.Tool{
 				Name:        "repo.services.discover",
 				Description: "Discover services in a repository by scanning for common patterns like Dockerfiles, go.mod, package.json, etc. Useful for finding service names to use with Datadog profiling.",
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"repo_root": prop("string", "Root directory of the repository to scan (default: current directory)"),
-					},
-					"required": []string{},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"repo_root": prop("string", "Root directory of the repository to scan (default: current directory)"),
+				}),
 			},
 			Handler: repoServicesTool,
 		},
@@ -377,16 +316,12 @@ func ToolSchemas() []ToolDefinition {
 **Example workflow**:
 1. Discover metrics for your service
 2. Use metric names with Datadog dashboards/queries to correlate with profile timestamps`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service": prop("string", "The service name to search for related metrics (required)"),
-						"env":     prop("string", "The environment (optional, for context)"),
-						"site":    prop("string", "Datadog site (default: from DD_SITE env or us3.datadoghq.com)"),
-						"query":   prop("string", "Additional metric name pattern to search for"),
-					},
-					"required": []string{"service"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service": prop("string", "The service name to search for related metrics (required)"),
+					"env":     prop("string", "The environment (optional, for context)"),
+					"site":    prop("string", "Datadog site (default: from DD_SITE env or us3.datadoghq.com)"),
+					"query":   prop("string", "Additional metric name pattern to search for"),
+				}, "service"),
 			},
 			Handler: datadogMetricsDiscoverTool,
 		},
@@ -409,21 +344,18 @@ func ToolSchemas() []ToolDefinition {
 **Example**: Compare profiles before and after a deploy:
 - before_from="-48h", before_to="-24h" (yesterday's baseline)
 - after_from="-4h", after_to="now" (recent profiles)`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service":      prop("string", "The service name (required)"),
-						"env":          prop("string", "The environment (required)"),
-						"site":         prop("string", "Datadog site"),
-						"before_from":  prop("string", "Start of 'before' range (RFC3339 or relative like '-48h') (required)"),
-						"before_to":    prop("string", "End of 'before' range (RFC3339 or relative, default: before_from + 12h)"),
-						"after_from":   prop("string", "Start of 'after' range (RFC3339 or relative like '-4h') (required)"),
-						"after_to":     prop("string", "End of 'after' range (RFC3339 or relative, default: now)"),
-						"out_dir":      prop("string", "Directory to store downloaded profiles (default: temp dir)"),
-						"profile_type": prop("string", "Profile type to compare: cpu, heap, goroutines, mutex, block (default: cpu)"),
-					},
-					"required": []string{"service", "env", "before_from", "after_from"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":      prop("string", "The service name (required)"),
+					"env":          prop("string", "The environment (required)"),
+					"site":         prop("string", "Datadog site"),
+					"before_from":  prop("string", "Start of 'before' range (RFC3339 or relative like '-48h') (required)"),
+					"before_to":    prop("string", "End of 'before' range (RFC3339 or relative, default: now)"),
+					"after_from":   prop("string", "Start of 'after' range (RFC3339 or relative like '-4h') (required)"),
+					"after_to":     prop("string", "End of 'after' range (RFC3339 or relative, default: now)"),
+					"out_dir":      prop("string", "Directory to store downloaded profiles (default: temp dir)"),
+					"profile_type": enumProp("string", "Profile type to compare: cpu, heap, goroutines, mutex, block (default: cpu)", []string{"cpu", "heap", "goroutines", "mutex", "block"}),
+				}, "service", "env", "before_from", "after_from"),
+				OutputSchema: compareRangeOutputSchema(),
 			},
 			Handler: datadogProfilesCompareRangeTool,
 		},
@@ -446,18 +378,14 @@ func ToolSchemas() []ToolDefinition {
 **Example**: Find profiles around an OOM at 2025-01-15T10:30:00Z:
 - event_time="2025-01-15T10:30:00Z"
 - window="1h" (search 1 hour before and after)`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service":    prop("string", "The service name (required)"),
-						"env":        prop("string", "The environment (required)"),
-						"site":       prop("string", "Datadog site"),
-						"event_time": prop("string", "Timestamp of the event (RFC3339 format, required)"),
-						"window":     prop("string", "Time window to search around event (e.g., '30m', '1h', '2h') (default: 1h)"),
-						"limit":      prop("integer", "Max profiles to return per side (default: 10)"),
-					},
-					"required": []string{"service", "env", "event_time"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":    prop("string", "The service name (required)"),
+					"env":        prop("string", "The environment (required)"),
+					"site":       prop("string", "Datadog site"),
+					"event_time": prop("string", "Timestamp of the event (RFC3339 format, required)"),
+					"window":     prop("string", "Time window to search around event (e.g., '30m', '1h', '2h') (default: 1h)"),
+					"limit":      integerProp("Max profiles to return per side (default: 10)", intPtr(0), nil),
+				}, "service", "env", "event_time"),
 			},
 			Handler: datadogProfilesNearEventTool,
 		},
@@ -470,21 +398,20 @@ func ToolSchemas() []ToolDefinition {
 - See what tags are available (tag_show parameter)
 - Filter to specific tag values (tag_focus/tag_ignore)
 
-**Example**: Filter CPU profile to a specific tenant: tag_focus="tenant_id:abc123"`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"tag_focus":    prop("string", "Regex to focus on samples with matching tag values (e.g., 'tenant_id:abc')"),
-						"tag_ignore":   prop("string", "Regex to ignore samples with matching tag values"),
-						"tag_show":     prop("string", "Show values for a specific tag key (e.g., 'tenant_id' to list all tenants)"),
-						"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
-						"nodecount":    prop("integer", "Maximum number of nodes to show"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
-					},
-					"required": []string{"profile"},
-				},
+**Example**: Filter CPU profile to a specific tenant: tag_focus="tenant_id:abc123"
+
+**Optional**: Use max_lines to cap the output size.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"binary":       BinaryPathOptional(),
+					"tag_focus":    prop("string", "Regex to focus on samples with matching tag values (e.g., 'tenant_id:abc')"),
+					"tag_ignore":   prop("string", "Regex to ignore samples with matching tag values"),
+					"tag_show":     prop("string", "Show values for a specific tag key (e.g., 'tenant_id' to list all tenants)"),
+					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
+					"nodecount":    integerProp("Maximum number of nodes to show", intPtr(0), nil),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
+					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+				}, "profile"),
 			},
 			Handler: pprofTagsTool,
 		},
@@ -496,20 +423,16 @@ func ToolSchemas() []ToolDefinition {
 **When to use**: For visual exploration of where time is spent. Flamegraphs show the full call stack with width proportional to time spent.
 
 **Output**: SVG file that can be opened in a browser for interactive exploration.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"output_path":  prop("string", "Path to write the SVG file (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"focus":        prop("string", "Regex to focus on specific functions"),
-						"ignore":       prop("string", "Regex to ignore specific functions"),
-						"tag_focus":    prop("string", "Regex to focus on samples with matching tag values"),
-						"tag_ignore":   prop("string", "Regex to ignore samples with matching tag values"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
-					},
-					"required": []string{"profile", "output_path"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"output_path":  prop("string", "Path to write the SVG file (required)"),
+					"binary":       BinaryPathOptional(),
+					"focus":        prop("string", "Regex to focus on specific functions"),
+					"ignore":       prop("string", "Regex to ignore specific functions"),
+					"tag_focus":    prop("string", "Regex to focus on samples with matching tag values"),
+					"tag_ignore":   prop("string", "Regex to ignore samples with matching tag values"),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
+				}, "profile", "output_path"),
 			},
 			Handler: pprofFlamegraphTool,
 		},
@@ -524,22 +447,18 @@ func ToolSchemas() []ToolDefinition {
 - dot: GraphViz DOT format (can be rendered with graphviz)
 - svg: Direct SVG visualization
 - png: PNG image`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"output_path":  prop("string", "Path to write the output file (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"format":       enumProp("string", "Output format: dot, svg, or png (default: dot)", []string{"dot", "svg", "png"}),
-						"focus":        prop("string", "Regex to focus on specific functions"),
-						"ignore":       prop("string", "Regex to ignore specific functions"),
-						"nodecount":    prop("integer", "Maximum number of nodes to show"),
-						"edge_frac":    prop("number", "Hide edges below this fraction (0.0-1.0)"),
-						"node_frac":    prop("number", "Hide nodes below this fraction (0.0-1.0)"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
-					},
-					"required": []string{"profile", "output_path"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"output_path":  prop("string", "Path to write the output file (required)"),
+					"binary":       BinaryPathOptional(),
+					"format":       enumProp("string", "Output format: dot, svg, or png (default: dot)", []string{"dot", "svg", "png"}),
+					"focus":        prop("string", "Regex to focus on specific functions"),
+					"ignore":       prop("string", "Regex to ignore specific functions"),
+					"nodecount":    integerProp("Maximum number of nodes to show", intPtr(0), nil),
+					"edge_frac":    numberProp("Hide edges below this fraction (0.0-1.0)", floatPtr(0), floatPtr(1)),
+					"node_frac":    numberProp("Hide nodes below this fraction (0.0-1.0)", floatPtr(0), floatPtr(1)),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
+				}, "profile", "output_path"),
 			},
 			Handler: pprofCallgraphTool,
 		},
@@ -550,19 +469,18 @@ func ToolSchemas() []ToolDefinition {
 
 **When to use**: When you know a function is hot (from pprof.top) and want to understand ALL the different ways it gets called.
 
-**Difference from peek**: peek shows immediate callers/callees; focus_paths shows complete call stacks.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profile":      prop("string", "Path to the pprof profile file (required)"),
-						"function":     prop("string", "Target function name or regex to find paths to (required)"),
-						"binary":       prop("string", "Path to the binary for symbol resolution"),
-						"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
-						"nodecount":    prop("integer", "Maximum number of paths to show"),
-						"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
-					},
-					"required": []string{"profile", "function"},
-				},
+**Difference from peek**: peek shows immediate callers/callees; focus_paths shows complete call stacks.
+
+**Optional**: Use max_lines to cap the output size.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"function":     prop("string", "Target function name or regex to find paths to (required)"),
+					"binary":       BinaryPathOptional(),
+					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
+					"nodecount":    integerProp("Maximum number of paths to show", intPtr(0), nil),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
+					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+				}, "profile", "function"),
 			},
 			Handler: pprofFocusPathsTool,
 		},
@@ -577,15 +495,11 @@ func ToolSchemas() []ToolDefinition {
 - Create a representative profile from multiple samples
 
 **Output**: A new .pprof file that can be analyzed with other pprof.* tools.`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"profiles":    arrayProp("string", "List of profile paths to merge (required, minimum 2)"),
-						"output_path": prop("string", "Path to write the merged profile (required)"),
-						"binary":      prop("string", "Path to the binary for symbol resolution"),
-					},
-					"required": []string{"profiles", "output_path"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"profiles":    arrayOrStringPropMin(prop("string", "Profile path"), "List of profile paths to merge (required, minimum 2)", 2),
+					"output_path": prop("string", "Path to write the merged profile (required)"),
+					"binary":      BinaryPathOptional(),
+				}, "profiles", "output_path"),
 			},
 			Handler: pprofMergeTool,
 		},
@@ -607,22 +521,20 @@ func ToolSchemas() []ToolDefinition {
 
 **Example**: Track "myFunction" over the last 24 hours:
   function="myFunction", hours=24, limit=10`,
-				InputSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]json.RawMessage{
-						"service":  prop("string", "The service name (required)"),
-						"env":      prop("string", "The environment (required)"),
-						"function": prop("string", "Function name or pattern to search for (required)"),
-						"from":     prop("string", "Start time (RFC3339 or relative like '-24h')"),
-						"to":       prop("string", "End time (RFC3339 or relative)"),
-						"hours":    prop("integer", "Number of hours to look back (default: 72)"),
-						"limit":    prop("integer", "Maximum number of profiles to check (default: 10)"),
-						"site":     prop("string", "Datadog site"),
-					},
-					"required": []string{"service", "env", "function"},
-				},
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":  prop("string", "The service name (required)"),
+					"env":      prop("string", "The environment (required)"),
+					"function": prop("string", "Function name or pattern to search for (required)"),
+					"from":     prop("string", "Start time (RFC3339 or relative like '-24h')"),
+					"to":       prop("string", "End time (RFC3339 or relative)"),
+					"hours":    integerProp("Number of hours to look back (default: 72)", intPtr(0), nil),
+					"limit":    integerProp("Maximum number of profiles to check (default: 10)", intPtr(0), nil),
+					"site":     prop("string", "Datadog site"),
+				}, "service", "env", "function"),
+				OutputSchema: functionHistoryOutputSchema(),
 			},
 			Handler: functionHistoryTool,
 		},
 	}
+	return tools
 }

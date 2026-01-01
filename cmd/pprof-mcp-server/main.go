@@ -25,10 +25,14 @@ func main() {
 		Instructions: "Profiling tools for Datadog profile download and deterministic pprof analysis.",
 	})
 
-	for _, def := range ToolSchemas() {
+	registry := NewToolRegistry()
+	if err := registry.AddAll(ToolSchemas()); err != nil {
+		log.Fatalf("Tool registry error: %v", err)
+	}
+	for _, def := range registry.List() {
 		def := def
 		mcp.AddTool(s, def.Tool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
-			return invokeTool(ctx, def.Handler, args)
+			return invokeTool(ctx, def.Tool, def.Handler, args)
 		})
 	}
 
@@ -39,25 +43,42 @@ func main() {
 	}
 }
 
-func invokeTool(ctx context.Context, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
-	result, err := handler(ctx, args)
+func invokeTool(ctx context.Context, tool *mcp.Tool, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
+	if err := ValidateArgs(tool, args); err != nil {
+		return ErrorResult(err, ""), nil, nil
+	}
+
+	cleanedArgs, err := sanitizeArgs(args)
 	if err != nil {
-		return nil, nil, err
+		return ErrorResult(err, "Provide paths within PPROF_MCP_BASEDIR if it is set."), nil, nil
+	}
+
+	result, err := handler(ctx, cleanedArgs)
+	if err != nil {
+		return ErrorResult(err, ""), nil, nil
 	}
 
 	switch v := result.(type) {
+	case ToolOutput:
+		res := TextResult(v.Text)
+		if v.Structured != nil {
+			return res, v.Structured, nil
+		}
+		return res, nil, nil
+	case *ToolOutput:
+		res := TextResult(v.Text)
+		if v.Structured != nil {
+			return res, v.Structured, nil
+		}
+		return res, nil, nil
 	case string:
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: v}},
-		}, nil, nil
+		return TextResult(v), nil, nil
 	case []mcp.Content:
 		return &mcp.CallToolResult{Content: v}, nil, nil
 	case mcp.Content:
 		return &mcp.CallToolResult{Content: []mcp.Content{v}}, nil, nil
 	default:
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%v", v)}},
-		}, nil, nil
+		return formatUnexpectedResult(v), nil, nil
 	}
 }
 
@@ -67,6 +88,9 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 	outDir := getString(args, "out_dir")
 	hours := getInt(args, "hours", 72)
 	site := getString(args, "dd_site")
+	if site == "" {
+		site = getString(args, "site")
+	}
 	profileID := getString(args, "profile_id")
 	eventID := getString(args, "event_id")
 
@@ -123,9 +147,22 @@ func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
@@ -143,18 +180,39 @@ func pprofListTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
 
 func pprofTracesTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	lines := getInt(args, "lines", 0)
+	if lines == 0 {
+		lines = getInt(args, "max_lines", defaultTracesLines)
+	}
+	if lines > maxTracesLines {
+		lines = maxTracesLines
+	}
+
 	result, err := pprof.RunTracesHead(ctx, pprof.TracesParams{
 		Profile: getString(args, "profile"),
 		Binary:  getString(args, "binary"),
-		Lines:   getInt(args, "lines", 200),
+		Lines:   lines,
 	})
 	if err != nil {
 		return nil, err
@@ -265,7 +323,8 @@ func datadogProfilesListTool(ctx context.Context, args map[string]any) (interfac
 		"command": fmt.Sprintf("profctl datadog profiles list --service %s --env %s", result.Service, result.Env),
 		"result":  result,
 	}
-	return marshalJSON(payload)
+	summary := fmt.Sprintf("Found %d profiles for %s/%s from %s to %s.", len(result.Candidates), result.Service, result.Env, result.FromTS, result.ToTS)
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func datadogProfilesPickTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -388,9 +447,25 @@ func pprofTagsTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		if len(result.Tags) > 0 {
+			payload["tags"] = result.Tags
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	if len(result.Tags) > 0 {
 		payload["tags"] = result.Tags
@@ -460,9 +535,22 @@ func pprofFocusPathsTool(ctx context.Context, args map[string]any) (interface{},
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
@@ -507,7 +595,8 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 		"result": result,
 		"table":  datadog.FormatFunctionHistoryTable(result),
 	}
-	return marshalJSON(payload)
+	summary := fmt.Sprintf("Function %s found in %d/%d profiles.", result.Function, result.Summary.FoundInProfiles, result.Summary.TotalProfiles)
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func getString(args map[string]any, key string) string {
@@ -624,13 +713,21 @@ func buildDownloadCommand(service, env, outDir string, hours int, site, profileI
 	return base
 }
 
-func marshalJSON(payload any) (interface{}, error) {
+func marshalJSON(payload any) (ToolOutput, error) {
+	return marshalJSONWithSummary("", payload)
+}
+
+func marshalJSONWithSummary(summary string, payload any) (ToolOutput, error) {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return nil, err
+		return ToolOutput{}, err
 	}
 	if len(data) == 0 {
-		return nil, errors.New("empty JSON response")
+		return ToolOutput{}, errors.New("empty JSON response")
 	}
-	return string(data), nil
+	text := string(data)
+	if summary != "" {
+		text = summary + "\n\n" + text
+	}
+	return ToolOutput{Text: text, Structured: payload}, nil
 }

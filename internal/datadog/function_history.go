@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // FunctionHistoryParams configures the function history search.
@@ -56,6 +57,8 @@ type FunctionHistorySummary struct {
 	AvgFlatPercent  float64 `json:"avg_flat_percent"`
 }
 
+const functionHistoryConcurrency = 3
+
 // SearchFunctionHistory searches for a function across multiple profiles over time.
 func SearchFunctionHistory(ctx context.Context, params FunctionHistoryParams) (FunctionHistoryResult, error) {
 	if params.Function == "" {
@@ -83,6 +86,7 @@ func SearchFunctionHistory(ctx context.Context, params FunctionHistoryParams) (F
 			Function: params.Function,
 			FromTS:   listResult.FromTS,
 			ToTS:     listResult.ToTS,
+			Entries:  []FunctionHistoryEntry{},
 			Warnings: []string{"no profiles found in time range"},
 		}, nil
 	}
@@ -94,57 +98,87 @@ func SearchFunctionHistory(ctx context.Context, params FunctionHistoryParams) (F
 	}
 	defer os.RemoveAll(tmpDir)
 
-	var entries []FunctionHistoryEntry
-	var warnings []string
+	entries := make([]FunctionHistoryEntry, len(listResult.Candidates))
+	warningsByIndex := make([][]string, len(listResult.Candidates))
 
-	// Process each profile
-	for _, candidate := range listResult.Candidates {
-		entry := FunctionHistoryEntry{
-			Timestamp: candidate.Timestamp,
-			ProfileID: candidate.ProfileID,
-			EventID:   candidate.EventID,
-			Found:     false,
+	sem := make(chan struct{}, functionHistoryConcurrency)
+	var wg sync.WaitGroup
+
+	// Process each profile with a small concurrency limit.
+	for i, candidate := range listResult.Candidates {
+		if err := ctx.Err(); err != nil {
+			return FunctionHistoryResult{}, err
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return FunctionHistoryResult{}, ctx.Err()
 		}
 
-		// Download profile
-		profileDir := filepath.Join(tmpDir, sanitizeFilename(candidate.ProfileID))
-		result, err := DownloadLatestBundle(ctx, DownloadParams{
-			Service:   params.Service,
-			Env:       params.Env,
-			OutDir:    profileDir,
-			Site:      params.Site,
-			Hours:     params.Hours,
-			ProfileID: candidate.ProfileID,
-			EventID:   candidate.EventID,
-		})
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to download profile %s: %v", candidate.ProfileID, err))
-			entries = append(entries, entry)
-			continue
-		}
+		wg.Add(1)
+		go func(idx int, c ProfileCandidate) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		// Find CPU profile
-		cpuProfile := findCPUProfile(result.Files)
-		if cpuProfile == "" {
-			warnings = append(warnings, fmt.Sprintf("no CPU profile found for %s", candidate.ProfileID))
-			entries = append(entries, entry)
-			continue
-		}
+			entry := FunctionHistoryEntry{
+				Timestamp: c.Timestamp,
+				ProfileID: c.ProfileID,
+				EventID:   c.EventID,
+				Found:     false,
+			}
 
-		// Search for function in profile
-		funcResult, err := searchFunctionInProfile(ctx, cpuProfile, params.Function)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to search profile %s: %v", candidate.ProfileID, err))
-			entries = append(entries, entry)
-			continue
-		}
+			if err := ctx.Err(); err != nil {
+				entries[idx] = entry
+				return
+			}
 
-		entry.Found = funcResult.Found
-		entry.FlatPercent = funcResult.FlatPercent
-		entry.CumPercent = funcResult.CumPercent
-		entry.FlatValue = funcResult.FlatValue
-		entry.CumValue = funcResult.CumValue
-		entries = append(entries, entry)
+			profileDir := filepath.Join(tmpDir, sanitizeFilename(c.ProfileID))
+			result, err := DownloadLatestBundle(ctx, DownloadParams{
+				Service:   params.Service,
+				Env:       params.Env,
+				OutDir:    profileDir,
+				Site:      params.Site,
+				Hours:     params.Hours,
+				ProfileID: c.ProfileID,
+				EventID:   c.EventID,
+			})
+			if err != nil {
+				warningsByIndex[idx] = append(warningsByIndex[idx], fmt.Sprintf("failed to download profile %s: %v", c.ProfileID, err))
+				entries[idx] = entry
+				return
+			}
+
+			cpuProfile := findCPUProfile(result.Files)
+			if cpuProfile == "" {
+				warningsByIndex[idx] = append(warningsByIndex[idx], fmt.Sprintf("no CPU profile found for %s", c.ProfileID))
+				entries[idx] = entry
+				return
+			}
+
+			funcResult, err := searchFunctionInProfile(ctx, cpuProfile, params.Function)
+			if err != nil {
+				warningsByIndex[idx] = append(warningsByIndex[idx], fmt.Sprintf("failed to search profile %s: %v", c.ProfileID, err))
+				entries[idx] = entry
+				return
+			}
+
+			entry.Found = funcResult.Found
+			entry.FlatPercent = funcResult.FlatPercent
+			entry.CumPercent = funcResult.CumPercent
+			entry.FlatValue = funcResult.FlatValue
+			entry.CumValue = funcResult.CumValue
+			entries[idx] = entry
+		}(i, candidate)
+	}
+
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return FunctionHistoryResult{}, err
+	}
+
+	warnings := make([]string, 0)
+	for _, items := range warningsByIndex {
+		warnings = append(warnings, items...)
 	}
 
 	// Sort by timestamp (newest first)
