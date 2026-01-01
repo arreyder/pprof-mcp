@@ -237,6 +237,16 @@ func DetectOverhead(prof *profile.Profile, sampleIndex int) OverheadReport {
 	return report
 }
 
+// OverheadCategoryPatterns returns the regex patterns for a given overhead category name.
+func OverheadCategoryPatterns(category string) []string {
+	for _, cat := range overheadCategories {
+		if cat.Name == category {
+			return append([]string{}, cat.Patterns...)
+		}
+	}
+	return nil
+}
+
 func matchesCategory(funcName string, cat OverheadCategory) bool {
 	for _, pattern := range cat.Patterns {
 		if strings.Contains(funcName, pattern) {

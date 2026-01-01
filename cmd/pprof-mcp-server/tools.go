@@ -345,6 +345,81 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "pprof.trace_source",
+				Description: `Trace a hot function through the call chain with annotated source code.
+
+**When to use**: After identifying a hot function, to inspect the exact source lines in app code or vendored deps.
+
+**Returns**: Call chain with source snippets, flat/cum percentages, and vendor metadata.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":       ProfilePath(),
+					"function":      prop("string", "Function name or regex to trace (required)"),
+					"repo_root":     prop("string", "Repository root for source resolution"),
+					"max_depth":     integerProp("Maximum call stack depth to trace (default: 10)", intPtr(0), nil),
+					"show_vendor":   prop("boolean", "Include vendored dependencies (default: true)"),
+					"context_lines": integerProp("Lines of context around hot lines (default: 5)", intPtr(0), nil),
+				}, "profile", "function"),
+				OutputSchema: pprofTraceSourceOutputSchema(),
+			},
+			Handler: pprofTraceSourceTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.vendor_analyze",
+				Description: `Analyze vendored or external dependencies in hot paths.
+
+**When to use**: Identify expensive external packages, versions, and known issues.
+
+**Returns**: Aggregated vendor hotspots with version info and known performance notes.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":       ProfilePath(),
+					"repo_root":     prop("string", "Repository root for go.mod and vendor resolution"),
+					"min_pct":       numberProp("Minimum percentage to include (default: 1.0)", floatPtr(0), nil),
+					"check_updates": prop("boolean", "Check for newer versions (default: false)"),
+				}, "profile"),
+				OutputSchema: pprofVendorAnalyzeOutputSchema(),
+			},
+			Handler: pprofVendorAnalyzeTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.explain_overhead",
+				Description: `Explain why an overhead category or function is expensive and suggest optimizations.
+
+**When to use**: After overhead_report or when a specific function appears hot.
+
+**Returns**: Detailed explanation with causes and optimization strategies.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePathOptional(),
+					"category":     prop("string", "Overhead category from overhead_report"),
+					"function":     prop("string", "Specific function to explain"),
+					"detail_level": prop("string", "brief, standard, or detailed (default: standard)"),
+				}),
+				OutputSchema: pprofExplainOverheadOutputSchema(),
+			},
+			Handler: pprofExplainOverheadTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.suggest_fix",
+				Description: `Suggest concrete fixes based on profile analysis and issue type.
+
+**When to use**: Generate actionable patches and PR descriptions for known performance issues.
+
+**Returns**: Suggested fixes, diffs, and next steps.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":         ProfilePath(),
+					"issue":           prop("string", "Issue identifier (required)"),
+					"repo_root":       prop("string", "Repository root for patch generation"),
+					"target_function": prop("string", "Optional function to target"),
+					"output_format":   prop("string", "structured, diff, or pr_description (default: structured)"),
+				}, "profile", "issue"),
+				OutputSchema: pprofSuggestFixOutputSchema(),
+			},
+			Handler: pprofSuggestFixTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "datadog.profiles.list",
 				Description: `List available profiles from Datadog for a service.
 

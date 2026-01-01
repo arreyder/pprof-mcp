@@ -362,6 +362,128 @@ func pprofRegressionCheckOutputSchema() map[string]any {
 	}, "command", "result")
 }
 
+func pprofTraceSourceOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"call_chain": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":       prop("string", "Function name"),
+				"file":           prop("string", "Source file path"),
+				"line":           prop("integer", "Line number"),
+				"flat_pct":       prop("number", "Flat percent"),
+				"cum_pct":        prop("number", "Cumulative percent"),
+				"source_snippet": prop("string", "Annotated source snippet"),
+				"is_vendor":      prop("boolean", "Whether frame is vendor code"),
+				"vendor_package": prop("string", "Vendor module path"),
+				"vendor_version": prop("string", "Vendor module version"),
+				"source_error":   prop("string", "Source resolution error"),
+			}, "function", "file", "line", "flat_pct", "cum_pct", "source_snippet", "is_vendor"), "Call chain frames"),
+			"total_functions_traced": prop("integer", "Total functions traced"),
+			"app_functions":          prop("integer", "Functions in app code"),
+			"vendor_functions":       prop("integer", "Functions in vendor code"),
+			"warnings":               arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "call_chain", "total_functions_traced", "app_functions", "vendor_functions"),
+	}, "command", "result")
+}
+
+func pprofVendorAnalyzeOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"vendor_hotspots": arrayPropSchema(NewObjectSchema(map[string]any{
+				"package":        prop("string", "Package name"),
+				"version":        prop("string", "Current version"),
+				"total_flat_pct": prop("number", "Total flat percent"),
+				"total_cum_pct":  prop("number", "Total cumulative percent"),
+				"hot_functions": arrayPropSchema(NewObjectSchema(map[string]any{
+					"name":     prop("string", "Function name"),
+					"flat_pct": prop("number", "Flat percent"),
+				}, "name", "flat_pct"), "Hot functions"),
+				"repo_url":       prop("string", "Repository URL"),
+				"latest_version": prop("string", "Latest version"),
+				"known_issues": arrayPropSchema(NewObjectSchema(map[string]any{
+					"pattern":        prop("string", "Pattern"),
+					"severity":       prop("string", "Severity"),
+					"issue":          prop("string", "Issue description"),
+					"recommendation": prop("string", "Recommendation"),
+				}, "pattern", "severity", "issue", "recommendation"), "Known issues"),
+			}, "package", "total_flat_pct", "total_cum_pct", "hot_functions"), "Vendor hotspots"),
+			"total_vendor_pct": prop("number", "Total vendor percentage"),
+			"total_app_pct":    prop("number", "Total app percentage"),
+			"warnings":         arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "vendor_hotspots", "total_vendor_pct", "total_app_pct"),
+	}, "command", "result")
+}
+
+func pprofExplainOverheadOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"category": prop("string", "Overhead category"),
+			"explanation": NewObjectSchema(map[string]any{
+				"summary":       prop("string", "Summary"),
+				"detailed":      prop("string", "Detailed explanation"),
+				"why_slow":      arrayPropSchema(prop("string", "Why slow"), "Why slow"),
+				"common_causes": arrayPropSchema(prop("string", "Common cause"), "Common causes"),
+			}, "summary", "detailed", "why_slow", "common_causes"),
+			"in_your_profile": NewObjectSchema(map[string]any{
+				"total_pct": prop("number", "Total percent in profile"),
+				"top_contributors": arrayPropSchema(NewObjectSchema(map[string]any{
+					"function": prop("string", "Function name"),
+					"pct":      prop("number", "Percent"),
+				}, "function", "pct"), "Top contributors"),
+			}, "total_pct", "top_contributors"),
+			"optimization_strategies": arrayPropSchema(NewObjectSchema(map[string]any{
+				"strategy":        prop("string", "Strategy"),
+				"expected_impact": prop("string", "Expected impact"),
+				"effort":          prop("string", "Effort"),
+				"description":     prop("string", "Description"),
+				"applicable":      prop("boolean", "Applicable"),
+				"reason":          prop("string", "Applicability reason"),
+			}, "strategy", "expected_impact", "effort", "description", "applicable"), "Optimization strategies"),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "category", "explanation", "optimization_strategies"),
+	}, "command", "result")
+}
+
+func pprofSuggestFixOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"issue": prop("string", "Issue identifier"),
+			"analysis": NewObjectSchema(map[string]any{
+				"overhead_pct": prop("number", "Overhead percent"),
+				"top_functions": arrayPropSchema(NewObjectSchema(map[string]any{
+					"function": prop("string", "Function name"),
+					"pct":      prop("number", "Percent"),
+				}, "function", "pct"), "Top functions"),
+			}, "overhead_pct", "top_functions"),
+			"applicable_fixes": arrayPropSchema(NewObjectSchema(map[string]any{
+				"fix_id":          prop("string", "Fix identifier"),
+				"description":     prop("string", "Description"),
+				"expected_impact": NewObjectSchemaWithAdditional(map[string]any{}, true),
+				"files_to_modify": arrayPropSchema(NewObjectSchema(map[string]any{
+					"path":          prop("string", "File path"),
+					"is_vendor":     prop("boolean", "Is vendor file"),
+					"upstream_repo": prop("string", "Upstream repo"),
+					"changes": arrayPropSchema(NewObjectSchema(map[string]any{
+						"line":   prop("integer", "Line number"),
+						"before": prop("string", "Before"),
+						"after":  prop("string", "After"),
+					}, "line", "before", "after"), "Line changes"),
+				}, "path", "is_vendor", "changes"), "Files to modify"),
+				"diff":               prop("string", "Unified diff"),
+				"pr_description":     prop("string", "PR description"),
+				"considerations":     arrayPropSchema(prop("string", "Consideration"), "Considerations"),
+				"is_vendored":        prop("boolean", "Is vendored"),
+				"upstream_pr_needed": prop("boolean", "Upstream PR needed"),
+			}, "fix_id", "description", "expected_impact", "files_to_modify", "diff", "pr_description", "considerations", "is_vendored", "upstream_pr_needed"), "Applicable fixes"),
+			"next_steps": arrayPropSchema(prop("string", "Next step"), "Next steps"),
+			"warnings":   arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "issue", "analysis", "applicable_fixes", "next_steps"),
+	}, "command", "result")
+}
+
 func datadogProfilesAggregateOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command": prop("string", "CLI command equivalent"),

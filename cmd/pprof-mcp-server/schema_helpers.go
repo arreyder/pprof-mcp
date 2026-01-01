@@ -97,6 +97,10 @@ func ProfilePath() map[string]any {
 	return prop("string", "Path to the pprof profile file (required). Accepts handle IDs like handle:abc123 from profiles.download_latest_bundle.")
 }
 
+func ProfilePathOptional() map[string]any {
+	return prop("string", "Path to the pprof profile file. Accepts handle IDs like handle:abc123 from profiles.download_latest_bundle.")
+}
+
 func BinaryPathOptional() map[string]any {
 	return prop("string", "Path to the binary for symbol resolution")
 }

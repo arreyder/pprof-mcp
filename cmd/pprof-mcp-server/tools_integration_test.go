@@ -144,6 +144,26 @@ func TestIntegrationAllTools(t *testing.T) {
 		"bundle":    cpuHandle,
 		"nodecount": 3,
 	})
+	_ = runTool(t, ctx, "pprof.trace_source", map[string]any{
+		"profile":   cpuHandle,
+		"function":  topFunction,
+		"repo_root": repoRoot(t),
+		"max_depth": 5,
+	})
+	_ = runTool(t, ctx, "pprof.vendor_analyze", map[string]any{
+		"profile":   cpuHandle,
+		"repo_root": repoRoot(t),
+		"min_pct":   1.0,
+	})
+	_ = runTool(t, ctx, "pprof.explain_overhead", map[string]any{
+		"profile":  cpuHandle,
+		"category": "Runtime/GC",
+	})
+	_ = runTool(t, ctx, "pprof.suggest_fix", map[string]any{
+		"profile":   cpuHandle,
+		"issue":     "protojson_overhead",
+		"repo_root": repoRoot(t),
+	})
 	_ = runTool(t, ctx, "datadog.profiles.aggregate", map[string]any{
 		"service":      service,
 		"env":          env,

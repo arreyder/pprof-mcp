@@ -258,7 +258,7 @@ pprof.contention_analysis(profile="handle:abc123")
 
 ## Medium Value Improvements
 
-### 5. Comparative Baseline Context
+### 5. [x] Comparative Baseline Context
 
 **Effort:** Medium
 **Value:** Medium
@@ -296,7 +296,7 @@ Add `pprof.generate_report` that formats analysis results as markdown.
 
 ---
 
-### 7. Add `pprof.cross_correlate` Tool
+### 7. [x] Add `pprof.cross_correlate` Tool
 
 **Effort:** Medium
 **Value:** Medium
@@ -348,7 +348,7 @@ pprof.cross_correlate(bundle="handle:bundle123")
 
 ---
 
-### 8. Add `pprof.regression_check` Tool
+### 8. [x] Add `pprof.regression_check` Tool
 
 **Effort:** Low
 **Value:** Medium
@@ -464,6 +464,589 @@ datadog.profiles.aggregate(
 
 ---
 
+---
+
+## NEW: Source & Fix Analysis Tools
+
+These tools were identified during a temporal_sync profiling session where tracing the root cause (protojson in vendored baton-sdk) required manual file reading and grep searches.
+
+### 12. [x] Add `pprof.trace_source` Tool
+
+**Effort:** High
+**Value:** Very High
+
+Trace hot functions through the call chain, displaying actual source code including vendored dependencies.
+
+**Requirements:**
+- Given a hot function, show the complete call chain with source code
+- Resolve source files in: app code, vendor directory, Go mod cache
+- Annotate source lines with CPU/memory attribution from the profile
+- Support context lines around hot spots
+
+**Parameters:**
+```json
+{
+  "profile": "string (required) - Path or handle to pprof profile",
+  "function": "string (required) - Function name or regex to trace",
+  "repo_root": "string (optional) - Local repository root for source resolution",
+  "max_depth": "integer (optional, default: 10) - Maximum call stack depth to trace",
+  "show_vendor": "boolean (optional, default: true) - Include vendored dependency source",
+  "context_lines": "integer (optional, default: 5) - Lines of context around hot lines"
+}
+```
+
+**Implementation approach:**
+1. Use existing `pprof_focus_paths` logic to get call stack for target function
+2. Extract source locations from profile data (file path + line number per frame)
+3. Resolve source files:
+   - App code: `{repo_root}/{relative_path}`
+   - Vendored: `{repo_root}/vendor/{package_path}/{file}`
+   - Go mod cache: `{GOPATH}/pkg/mod/{package}@{version}/{file}`
+4. Read each source file and highlight hot lines with profile metrics
+5. Return structured output with annotated source snippets
+
+**Source resolution logic:**
+```go
+func resolveSourceFile(frame StackFrame, repoRoot string) (string, error) {
+    // 1. Check if it's a local app file
+    if strings.HasPrefix(frame.Package, repoPrefix) {
+        relativePath := strings.TrimPrefix(frame.File, "/xsrc/")
+        return filepath.Join(repoRoot, relativePath), nil
+    }
+
+    // 2. Check vendor directory
+    vendorPath := filepath.Join(repoRoot, "vendor", frame.Package, filepath.Base(frame.File))
+    if fileExists(vendorPath) {
+        return vendorPath, nil
+    }
+
+    // 3. Try go mod download cache
+    goModCache := filepath.Join(os.Getenv("GOPATH"), "pkg/mod", frame.Package+"@"+version)
+    if fileExists(goModCache) {
+        return goModCache, nil
+    }
+
+    return "", ErrSourceNotFound
+}
+```
+
+**Output structure:**
+```json
+{
+  "call_chain": [
+    {
+      "function": "gitlab.com/ductone/c1/pkg/ulambda/connectors.(*connectorClient).Invoke",
+      "file": "/home/user/repos/c1/pkg/ulambda/connectors/connector_client.go",
+      "line": 219,
+      "flat_pct": 0.5,
+      "cum_pct": 15.2,
+      "source_snippet": "217:   token, err := c.getAuthToken(ctx)\n218:   // ...\n>>>219:   return c.cc.Invoke(ctx, method, args, reply, opts...)\n220:   // ...",
+      "is_vendor": false
+    },
+    {
+      "function": "google.golang.org/protobuf/encoding/protojson.decoder.unmarshalMessage",
+      "file": "/home/user/repos/c1/vendor/google.golang.org/protobuf/encoding/protojson/decode.go",
+      "line": 142,
+      "flat_pct": 8.2,
+      "cum_pct": 12.1,
+      "source_snippet": "... annotated source ...",
+      "is_vendor": true,
+      "vendor_package": "google.golang.org/protobuf",
+      "vendor_version": "v1.31.0"
+    }
+  ],
+  "total_functions_traced": 8,
+  "app_functions": 3,
+  "vendor_functions": 5
+}
+```
+
+**Validation requirements:**
+1. Schema must define `call_chain` as array with all nested fields
+2. Test with function in app code
+3. Test with function in vendored dependency
+4. Test with function not found (should return helpful error)
+5. Test `max_depth` limiting
+6. Handle case where source file doesn't exist locally
+
+---
+
+### 13. [x] Add `pprof.vendor_analyze` Tool
+
+**Effort:** Medium
+**Value:** High
+
+Analyze vendored dependencies appearing in hot paths, providing version info, upstream links, and known performance issues.
+
+**Requirements:**
+- Identify external packages in hot paths
+- Parse go.mod to get current versions
+- Aggregate CPU/memory by top-level package
+- Enrich with known performance issues from knowledge base
+- Optionally check for newer versions
+
+**Parameters:**
+```json
+{
+  "profile": "string (required) - Path or handle to pprof profile",
+  "repo_root": "string (optional) - Repository root to find go.mod/vendor",
+  "min_pct": "number (optional, default: 1.0) - Minimum percentage to include",
+  "check_updates": "boolean (optional, default: false) - Check for newer versions"
+}
+```
+
+**Implementation approach:**
+1. Run `pprof_top` to get hot functions
+2. Parse function names to extract package paths, filter to external packages
+3. Parse `go.mod` to get current versions:
+   ```go
+   func parseGoMod(repoRoot string) (map[string]string, error) {
+       content, _ := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+       // Parse require blocks, extract module -> version mapping
+   }
+   ```
+4. Aggregate by top-level package (sum CPU/memory percentages)
+5. Match against known performance issues database
+6. Derive GitHub/GitLab repo URL from package path
+
+**Knowledge base file (`known_perf_issues.yaml`):**
+```yaml
+packages:
+  "google.golang.org/protobuf":
+    repo_url: "https://github.com/protocolbuffers/protobuf-go"
+    patterns:
+      - match: "protojson"
+        severity: high
+        issue: "protojson uses reflection, 5-10x slower than binary proto"
+        recommendation: "Use proto.Marshal/Unmarshal for performance-critical paths"
+      - match: "anypb.UnmarshalTo"
+        severity: medium
+        issue: "Any type requires type registry lookup for each message"
+        recommendation: "Consider using concrete types instead of Any"
+
+  "encoding/json":
+    patterns:
+      - match: "Unmarshal|Decode"
+        severity: medium
+        issue: "Standard library json uses reflection"
+        recommendation: "Consider json-iterator/go or code generation (easyjson)"
+
+  "github.com/klauspost/compress/zstd":
+    patterns:
+      - match: "Encode|Decode"
+        severity: low
+        issue: "Compression is CPU-intensive by nature"
+        recommendation: "Consider compression level trade-offs, use sync.Pool for encoders"
+
+  "database/sql":
+    patterns:
+      - match: "(*DB).Query|(*DB).Exec"
+        severity: medium
+        issue: "Connection pool contention or query preparation overhead"
+        recommendation: "Use prepared statements, tune pool size"
+```
+
+**Output structure:**
+```json
+{
+  "vendor_hotspots": [
+    {
+      "package": "google.golang.org/protobuf",
+      "version": "v1.31.0",
+      "total_flat_pct": 12.5,
+      "total_cum_pct": 45.2,
+      "hot_functions": [
+        {"name": "protojson.decoder.unmarshalMessage", "flat_pct": 8.2},
+        {"name": "protojson.decoder.unmarshalAny", "flat_pct": 4.3}
+      ],
+      "repo_url": "https://github.com/protocolbuffers/protobuf-go",
+      "latest_version": "v1.32.0",
+      "known_issues": [
+        {
+          "pattern": "protojson",
+          "severity": "high",
+          "issue": "protojson uses reflection and is 5-10x slower than binary proto",
+          "recommendation": "Use proto.Marshal/Unmarshal instead of protojson when possible"
+        }
+      ]
+    }
+  ],
+  "total_vendor_pct": 65.3,
+  "total_app_pct": 34.7
+}
+```
+
+**Validation requirements:**
+1. Schema must define `vendor_hotspots` array with nested `hot_functions` and `known_issues` arrays
+2. Test with profile that has vendored dependencies in hot path
+3. Test `check_updates` flag (may need network access or mock)
+4. Test with missing go.mod (should still work, just without versions)
+5. Verify known_issues matching works with regex patterns
+
+---
+
+### 14. [x] Add `pprof.explain_overhead` Tool
+
+**Effort:** Medium
+**Value:** High
+
+Given an overhead category or hot function, provide detailed explanation of why it's slow and the underlying mechanisms.
+
+**Requirements:**
+- Accept category (from overhead_report) or specific function
+- Return detailed explanation of WHY it's slow, not just WHAT is slow
+- Include optimization strategies with expected impact and effort
+- Contextualize with actual profile data if provided
+
+**Parameters:**
+```json
+{
+  "profile": "string (optional) - Path or handle for context",
+  "category": "string (optional) - Overhead category from overhead_report (e.g., 'Protobuf Serialization', 'Runtime/GC')",
+  "function": "string (optional) - Specific function to explain",
+  "detail_level": "string (optional, default: 'standard') - 'brief', 'standard', 'detailed'"
+}
+```
+
+**Implementation approach:**
+1. Build explanation database (`explanations.yaml`) with structured knowledge
+2. Match input (category or function) to explanations
+3. If profile provided, pull actual metrics to contextualize
+4. Format response based on detail_level
+
+**Explanation database (`explanations.yaml`):**
+```yaml
+categories:
+  "Protobuf Serialization":
+    brief: "Protocol buffer marshaling/unmarshaling overhead"
+    standard: |
+      Protobuf serialization appears as overhead due to:
+
+      1. **Reflection**: protojson and some proto operations use Go reflection
+         to access message fields dynamically, which is slow compared to
+         generated code.
+
+      2. **Memory allocation**: Each unmarshal creates new message objects.
+         Without pooling, this creates GC pressure.
+
+      3. **Type resolution**: google.protobuf.Any requires registry lookups
+         via protoregistry.GlobalTypes.FindMessageByURL() for every Any field.
+
+      4. **String conversion**: protojson parses/generates UTF-8 strings,
+         allocating for each string field.
+    detailed: |
+      [Even more detail with code examples...]
+    common_causes:
+      - "Using protojson instead of binary proto"
+      - "Excessive use of google.protobuf.Any wrappers"
+      - "Not reusing message objects with Reset()"
+      - "Large messages with many fields"
+    optimization_strategies:
+      - strategy: "Switch to binary proto"
+        impact: "5-10x faster serialization"
+        effort: "medium"
+        description: "Replace protojson.Marshal/Unmarshal with proto.Marshal/Unmarshal"
+      - strategy: "Use message pools"
+        impact: "2-3x faster, reduces GC"
+        effort: "low"
+        description: "Use sync.Pool to reuse message objects"
+      - strategy: "Avoid Any types"
+        impact: "Eliminates type registry lookups"
+        effort: "high"
+        description: "Use concrete types or oneof instead of Any"
+
+  "Runtime/GC":
+    brief: "Go garbage collection overhead"
+    standard: |
+      High GC overhead indicates memory allocation pressure:
+
+      1. **Allocation rate**: Creating many short-lived objects triggers
+         frequent GC cycles. Each cycle pauses goroutines for marking.
+
+      2. **Heap size**: Larger heaps take longer to scan. GC work is
+         proportional to live heap size.
+
+      3. **Pointer-heavy structures**: Maps, slices of pointers, and
+         linked structures require more GC scanning than flat data.
+    optimization_strategies:
+      - strategy: "Reduce allocations with sync.Pool"
+        impact: "20-50% GC reduction"
+        effort: "low"
+      - strategy: "Pre-allocate slices"
+        impact: "Reduces slice growth allocations"
+        effort: "low"
+      - strategy: "Use GOGC tuning"
+        impact: "Trade memory for CPU"
+        effort: "low"
+        description: "Set GOGC=200 to run GC less frequently"
+
+functions:
+  "protojson.decoder.unmarshalAny":
+    category: "Protobuf Serialization"
+    explanation: |
+      This function unmarshals google.protobuf.Any messages from JSON.
+
+      It's slow because it must:
+      1. Parse the @type URL string from JSON
+      2. Look up the message type in protoregistry.GlobalTypes
+      3. Create a new instance of that type via reflection
+      4. Recursively unmarshal the nested message
+
+      The type registry lookup alone requires string parsing and map
+      lookups for EVERY Any field in the message tree.
+    why_expensive: "Type registry lookup + reflection-based instantiation"
+    alternatives:
+      - "Use concrete types instead of Any"
+      - "Use binary proto encoding (avoids JSON parsing entirely)"
+      - "If Any is required, consider caching resolved types"
+```
+
+**Output structure:**
+```json
+{
+  "category": "Protobuf Serialization",
+  "explanation": {
+    "summary": "Protocol buffer marshaling/unmarshaling overhead",
+    "detailed": "... full explanation from database ...",
+    "why_slow": [
+      "Reflection-based field access",
+      "Type URL resolution for Any types",
+      "String parsing allocations"
+    ],
+    "common_causes": [
+      "Using protojson instead of binary proto",
+      "Excessive use of google.protobuf.Any wrappers"
+    ]
+  },
+  "in_your_profile": {
+    "total_pct": 159.7,
+    "top_contributors": [
+      {"function": "protojson.decoder.unmarshalMessage", "pct": 45.2},
+      {"function": "protojson.decoder.unmarshalAny", "pct": 32.1}
+    ]
+  },
+  "optimization_strategies": [
+    {
+      "strategy": "Switch to binary proto encoding",
+      "expected_impact": "5-10x faster serialization",
+      "effort": "medium",
+      "description": "Replace protojson.Marshal/Unmarshal with proto.Marshal/Unmarshal",
+      "applicable": true,
+      "reason": "Your profile shows protojson is dominant; binary proto would eliminate this"
+    }
+  ]
+}
+```
+
+**Validation requirements:**
+1. Schema must define nested `explanation`, `in_your_profile`, and `optimization_strategies` objects
+2. Test with known category (e.g., "Runtime/GC")
+3. Test with specific function (e.g., "protojson.decoder.unmarshalAny")
+4. Test with profile provided (should include `in_your_profile` section)
+5. Test without profile (should omit `in_your_profile` or return null)
+6. Test with unknown category/function (should return helpful message)
+
+---
+
+### 15. [x] Add `pprof.suggest_fix` Tool
+
+**Effort:** High
+**Value:** Very High
+
+Generate concrete, actionable code changes to fix identified performance issues, including file paths, diffs, and PR descriptions.
+
+**Requirements:**
+- Identify applicable fixes based on profile analysis
+- Generate concrete code patches (unified diff format)
+- Include PR description with context and expected impact
+- Handle vendored dependencies (note upstream PR needed)
+
+**Parameters:**
+```json
+{
+  "profile": "string (required) - Path or handle to pprof profile",
+  "issue": "string (required) - Issue identifier (e.g., 'protojson_overhead', 'gc_pressure', 'allocation_hot_spot')",
+  "repo_root": "string (optional) - Repository root for generating patches",
+  "target_function": "string (optional) - Specific function to optimize",
+  "output_format": "string (optional, default: 'structured') - 'structured', 'diff', 'pr_description'"
+}
+```
+
+**Implementation approach:**
+1. Define fix templates (`fix_templates.yaml`) for common issues
+2. Analyze profile to identify which fixes apply
+3. If repo_root provided, find actual files and generate real diffs
+4. Generate PR description with context
+
+**Fix templates (`fix_templates.yaml`):**
+```yaml
+fixes:
+  protojson_to_binary:
+    issue_id: "protojson_overhead"
+    description: "Replace protojson with binary proto encoding"
+    applicable_when:
+      - "protojson appears in hot path with >10% CPU"
+      - "Binary proto is acceptable (not human-readable requirement)"
+    detection_patterns:
+      - "protojson.Marshal"
+      - "protojson.Unmarshal"
+      - "protojson.decoder"
+    template:
+      before: |
+        import "google.golang.org/protobuf/encoding/protojson"
+
+        func marshal(msg proto.Message) ([]byte, error) {
+            return protojson.Marshal(msg)
+        }
+
+        func unmarshal(b []byte, msg proto.Message) error {
+            return protojson.Unmarshal(b, msg)
+        }
+      after: |
+        import "google.golang.org/protobuf/proto"
+
+        func marshal(msg proto.Message) ([]byte, error) {
+            return proto.Marshal(msg)
+        }
+
+        func unmarshal(b []byte, msg proto.Message) error {
+            return proto.Unmarshal(b, msg)
+        }
+    considerations:
+      - "Binary proto is not human-readable for debugging"
+      - "Requires coordinated update if used in API/storage"
+      - "Consider content-type negotiation for backward compatibility"
+    expected_impact:
+      cpu_reduction: "40-60%"
+      allocation_reduction: "50-70%"
+    pr_template: |
+      ## Summary
+      Optimize {service} by switching from protojson to binary proto encoding.
+
+      ## Problem
+      Profile analysis shows protojson serialization consuming {overhead_pct}% of CPU time.
+
+      Top functions:
+      {top_functions}
+
+      ## Solution
+      Replace `protojson.Marshal/Unmarshal` with `proto.Marshal/Unmarshal`.
+
+      ## Expected Impact
+      - CPU reduction: 40-60%
+      - Allocation rate reduction: 50-70%
+
+      ## Testing
+      - [ ] Unit tests pass
+      - [ ] Integration tests pass
+      - [ ] Load test comparison before/after
+
+  sync_pool_for_allocations:
+    issue_id: "allocation_hot_spot"
+    description: "Use sync.Pool to reuse frequently allocated objects"
+    applicable_when:
+      - "Single type accounts for >5% of allocations"
+      - "Object is short-lived and frequently created"
+    template:
+      before: |
+        func process(data []byte) *Result {
+            result := &Result{}
+            // ... populate result
+            return result
+        }
+      after: |
+        var resultPool = sync.Pool{
+            New: func() interface{} {
+                return &Result{}
+            },
+        }
+
+        func process(data []byte) *Result {
+            result := resultPool.Get().(*Result)
+            result.Reset() // Clear previous data
+            // ... populate result
+            return result
+        }
+
+        // Caller must return to pool when done:
+        // defer resultPool.Put(result)
+    considerations:
+      - "Caller must return objects to pool"
+      - "Objects must be safely resettable (implement Reset method)"
+      - "Don't pool objects that escape to other goroutines long-term"
+    expected_impact:
+      allocation_reduction: "50-80% for pooled type"
+      gc_reduction: "Proportional to allocation reduction"
+```
+
+**Output structure:**
+```json
+{
+  "issue": "protojson_overhead",
+  "analysis": {
+    "overhead_pct": 159.7,
+    "top_functions": [
+      {"function": "protojson.decoder.unmarshalMessage", "pct": 45.2},
+      {"function": "protojson.Unmarshal", "pct": 32.1}
+    ]
+  },
+  "applicable_fixes": [
+    {
+      "fix_id": "protojson_to_binary",
+      "description": "Replace protojson with binary proto encoding",
+      "expected_impact": {
+        "cpu_reduction": "40-60%",
+        "allocation_reduction": "50-70%"
+      },
+      "files_to_modify": [
+        {
+          "path": "vendor/github.com/conductorone/baton-sdk/pkg/lambda/grpc/transport.go",
+          "is_vendor": true,
+          "upstream_repo": "https://github.com/conductorone/baton-sdk",
+          "changes": [
+            {
+              "line": 107,
+              "before": "return protojson.Marshal(f.msg)",
+              "after": "return proto.Marshal(f.msg)"
+            },
+            {
+              "line": 155,
+              "before": "return protojson.Unmarshal(b, f.msg)",
+              "after": "return proto.Unmarshal(b, f.msg)"
+            }
+          ]
+        }
+      ],
+      "diff": "--- a/pkg/lambda/grpc/transport.go\n+++ b/pkg/lambda/grpc/transport.go\n@@ -1,7 +1,7 @@\n...",
+      "pr_description": "## Summary\nOptimize temporal_sync by switching from protojson to binary proto...",
+      "considerations": [
+        "Requires coordinated update to Lambda handlers",
+        "Consider content-type negotiation for backward compatibility"
+      ],
+      "is_vendored": true,
+      "upstream_pr_needed": true
+    }
+  ],
+  "next_steps": [
+    "1. Open PR in upstream baton-sdk repo with the suggested changes",
+    "2. Update Lambda connector handlers to accept binary proto",
+    "3. Add content-type negotiation for backward compatibility",
+    "4. Update vendor in this repo after upstream merge"
+  ]
+}
+```
+
+**Validation requirements:**
+1. Schema must define deeply nested structure (`applicable_fixes` > `files_to_modify` > `changes`)
+2. Test with known issue type (e.g., "protojson_overhead")
+3. Test with profile that doesn't have the issue (should return empty fixes or "not applicable")
+4. Test diff generation with real repo_root
+5. Test with vendored file (should set `is_vendored: true`, `upstream_pr_needed: true`)
+6. Test `output_format` variations
+7. Verify PR description template substitution works
+
+---
+
 ## Low Value Improvements
 
 ### 10. [x] Auto-Suggest Tags/Tenant Analysis
@@ -480,7 +1063,7 @@ Automatically detect if profiles have tenant labels and suggest `pprof.tags` ana
 
 ---
 
-### 11. Add `pprof.hotspot_summary` Tool
+### 11. [x] Add `pprof.hotspot_summary` Tool
 
 **Effort:** Low
 **Value:** Low
