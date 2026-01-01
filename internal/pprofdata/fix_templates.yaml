@@ -9,6 +9,11 @@ fixes:
       - "protojson.Marshal"
       - "protojson.Unmarshal"
       - "protojson.decoder"
+      - "protojson.encoder"
+      - "encoding/protojson"
+      - "protobuf/internal/impl"
+      - "protobuf/proto.Marshal"
+      - "protobuf/proto.Unmarshal"
     template:
       before: |
         import "google.golang.org/protobuf/encoding/protojson"

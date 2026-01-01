@@ -356,7 +356,7 @@ func renderPRTemplate(template string, analysis SuggestFixAnalysis) string {
 
 func buildNextSteps(fixes []FixSuggestion) []string {
 	if len(fixes) == 0 {
-		return nil
+		return []string{}
 	}
 	steps := []string{}
 	for _, fix := range fixes {
