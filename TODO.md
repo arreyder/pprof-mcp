@@ -258,7 +258,7 @@ pprof.contention_analysis(profile="handle:abc123")
 
 ## Medium Value Improvements
 
-### 5. Comparative Baseline Context
+### 5. [x] Comparative Baseline Context
 
 **Effort:** Medium
 **Value:** Medium
