@@ -111,6 +111,47 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "d2.profile_branch_impact",
+				Description: `Compare profiles between git branches to measure performance impact of code changes.
+
+**When to use**: Measure the performance impact of a code change by comparing profiles before and after.
+
+**How it works**:
+1. Captures baseline profile from before_ref (default: main)
+2. Handles uncommitted changes (auto-stash/restore)
+3. Switches to after_ref (default: current branch)
+4. Waits for Tilt to rebuild (detects live updates or pod restarts)
+5. Captures post-change profile
+6. Returns handles for both profiles for comparison
+7. Restores original branch and uncommitted changes
+
+**Tilt Detection**:
+- Monitors Tilt API to detect when rebuild completes
+- Detects live updates (file sync) or full pod restarts
+- Reports which update method was used
+- Configurable timeout and warmup delays
+
+**Git Handling**:
+- Automatically stashes uncommitted changes before switching branches
+- Restores stashed changes after profiling
+- Returns to original branch on completion
+
+**Returns**: Profile handles for before/after, update method, and any warnings.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":         prop("string", "The service name to profile (e.g., ratelimit, innkeeper) (required)"),
+					"out_dir":         prop("string", "Output directory for downloaded profiles (required)"),
+					"before_ref":      prop("string", "Git ref for baseline (default: main)"),
+					"after_ref":       prop("string", "Git ref for comparison (default: current branch)"),
+					"seconds":         integerProp("Duration in seconds for CPU profile (default: 30)", intPtr(1), intPtr(300)),
+					"rebuild_timeout": integerProp("Timeout in seconds for rebuild detection (default: 300)", intPtr(10), intPtr(1800)),
+					"warmup_delay":    integerProp("Warmup delay in seconds after rebuild (default: 15)", intPtr(0), intPtr(120)),
+				}, "service", "out_dir"),
+				OutputSchema: d2BranchImpactOutputSchema(),
+			},
+			Handler: d2BranchImpactTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "pprof.top",
 				Description: `Show top functions by CPU/memory usage from a pprof profile.
 
