@@ -42,7 +42,13 @@ func sanitizeArgs(args map[string]any) (map[string]any, error) {
 				cleaned[key] = value
 				continue
 			}
-			path, err := sanitizePath(baseDir, str)
+			var path string
+			var err error
+			if isHandle(str) {
+				path, err = resolveHandlePath(baseDir, str)
+			} else {
+				path, err = sanitizePath(baseDir, str)
+			}
 			if err != nil {
 				expected := "valid path"
 				if baseDir != "" {
@@ -68,7 +74,13 @@ func sanitizeArgs(args map[string]any) (map[string]any, error) {
 				if !ok {
 					return nil, fmt.Errorf("invalid path value in %q", key)
 				}
-				path, err := sanitizePath(baseDir, str)
+				var path string
+				var err error
+				if isHandle(str) {
+					path, err = resolveHandlePath(baseDir, str)
+				} else {
+					path, err = sanitizePath(baseDir, str)
+				}
 				if err != nil {
 					expected := "valid path"
 					if baseDir != "" {

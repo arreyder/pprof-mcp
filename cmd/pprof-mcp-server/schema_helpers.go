@@ -94,7 +94,7 @@ func floatPtr(v float64) *float64 {
 }
 
 func ProfilePath() map[string]any {
-	return prop("string", "Path to the pprof profile file (required)")
+	return prop("string", "Path to the pprof profile file (required). Accepts handle IDs like handle:abc123 from profiles.download_latest_bundle.")
 }
 
 func BinaryPathOptional() map[string]any {

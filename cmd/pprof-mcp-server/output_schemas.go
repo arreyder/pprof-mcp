@@ -19,10 +19,10 @@ func numericFieldsSchema() map[string]any {
 
 func profileFileSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
-		"type":  prop("string", "Profile type (cpu, heap, mutex, block, goroutines)"),
-		"path":  prop("string", "Path to the downloaded profile"),
-		"bytes": prop("integer", "File size in bytes"),
-	}, "type", "path", "bytes")
+		"type":   prop("string", "Profile type (cpu, heap, mutex, block, goroutines)"),
+		"handle": prop("string", "Handle ID for the downloaded profile (use in pprof.* tools)"),
+		"bytes":  prop("integer", "File size in bytes"),
+	}, "type", "handle", "bytes")
 }
 
 func datadogProfilesListOutputSchema() map[string]any {
@@ -99,6 +99,64 @@ func pprofTopSummarySchema() map[string]any {
 		"header_lines": arrayPropSchema(prop("string", "Header line"), "Header lines"),
 		"table_header": prop("string", "Table header"),
 	}, "header_lines", "table_header")
+}
+
+func pprofGoroutineAnalysisOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"total_goroutines": prop("integer", "Total goroutine count"),
+			"by_state": map[string]any{
+				"type":                 "object",
+				"description":          "Goroutine counts by state",
+				"additionalProperties": map[string]any{"type": "integer"},
+			},
+			"top_wait_reasons": arrayPropSchema(NewObjectSchema(map[string]any{
+				"reason":       prop("string", "Wait reason"),
+				"count":        prop("integer", "Goroutine count"),
+				"sample_stack": prop("string", "Sample stack signature"),
+			}, "reason", "count"), "Top wait reasons"),
+			"potential_leaks": arrayPropSchema(NewObjectSchema(map[string]any{
+				"stack_signature": prop("string", "Stack signature"),
+				"count":           prop("integer", "Goroutine count"),
+				"severity":        prop("string", "Severity"),
+				"state":           prop("string", "Goroutine state"),
+				"wait_reason":     prop("string", "Wait reason"),
+			}, "stack_signature", "count", "severity"), "Potential leaks"),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "total_goroutines", "by_state"),
+	}, "command", "result")
+}
+
+func pprofDiscoverOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchemaWithAdditional(map[string]any{
+			"service":   prop("string", "Service name"),
+			"env":       prop("string", "Environment"),
+			"timestamp": prop("string", "Profile timestamp"),
+			"profiles": arrayPropSchema(NewObjectSchema(map[string]any{
+				"type":   prop("string", "Profile type"),
+				"handle": prop("string", "Profile handle"),
+				"bytes":  prop("integer", "File size in bytes"),
+			}, "type", "handle"), "Downloaded profile handles"),
+			"recommendations": arrayPropSchema(NewObjectSchema(map[string]any{
+				"priority":   prop("string", "Recommendation priority"),
+				"area":       prop("string", "Area of concern"),
+				"suggestion": prop("string", "Suggested action"),
+			}, "priority", "area", "suggestion"), "Prioritized recommendations"),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, true, "service", "env"),
+	}, "command", "result")
+}
+
+func pprofGenerateReportOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"markdown": prop("string", "Markdown report"),
+		}, "markdown"),
+	}, "command", "result")
 }
 
 func functionHistoryOutputSchema() map[string]any {

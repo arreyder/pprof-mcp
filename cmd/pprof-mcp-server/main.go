@@ -151,9 +151,32 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 		return nil, err
 	}
 
+	bundle, err := registerBundleHandles(result)
+	if err != nil {
+		return nil, err
+	}
+
+	resultPayload := map[string]any{
+		"service":    result.Service,
+		"env":        result.Env,
+		"dd_site":    result.DDSite,
+		"from_ts":    result.FromTS,
+		"to_ts":      result.ToTS,
+		"profile_id": result.ProfileID,
+		"event_id":   result.EventID,
+		"timestamp":  result.Timestamp,
+		"files":      bundle.Handles,
+	}
+	if result.MetricsPath != "" {
+		resultPayload["metrics_path"] = result.MetricsPath
+	}
+	if len(result.Warnings) > 0 {
+		resultPayload["warnings"] = result.Warnings
+	}
+
 	payload := map[string]any{
 		"command": buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID),
-		"result":  result,
+		"result":  resultPayload,
 	}
 	return marshalJSON(payload)
 }
@@ -358,6 +381,92 @@ func pprofMemorySanityTool(ctx context.Context, args map[string]any) (interface{
 		"result":  result,
 	}
 	return marshalJSON(payload)
+}
+
+func pprofGoroutineAnalysisTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunGoroutineAnalysis(pprof.GoroutineAnalysisParams{
+		Profile: getString(args, "profile"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof goroutine_analysis",
+		"result":  result,
+	}
+	summary := fmt.Sprintf("Found %d goroutines across %d states.", result.TotalGoroutines, len(result.ByState))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofDiscoverTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	service := getString(args, "service")
+	env := getString(args, "env")
+	outDir := getString(args, "out_dir")
+	if outDir == "" {
+		var err error
+		outDir, err = os.MkdirTemp("", "pprof-discover-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp dir: %w", err)
+		}
+	}
+	hours := getInt(args, "hours", 72)
+	site := getString(args, "dd_site")
+	if site == "" {
+		site = getString(args, "site")
+	}
+	profileID := getString(args, "profile_id")
+	eventID := getString(args, "event_id")
+
+	downloadResult, err := datadog.DownloadLatestBundle(ctx, datadog.DownloadParams{
+		Service:   service,
+		Env:       env,
+		OutDir:    outDir,
+		Hours:     hours,
+		Site:      site,
+		ProfileID: profileID,
+		EventID:   eventID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	bundle, err := registerBundleHandles(downloadResult)
+	if err != nil {
+		return nil, err
+	}
+
+	profileInputs := make([]pprof.DiscoveryProfileInput, 0, len(downloadResult.Files))
+	for _, file := range downloadResult.Files {
+		profileInputs = append(profileInputs, pprof.DiscoveryProfileInput{
+			Type:   file.Type,
+			Path:   file.Path,
+			Handle: bundle.HandleByType[file.Type],
+			Bytes:  file.Bytes,
+		})
+	}
+
+	report, err := pprof.RunDiscovery(ctx, pprof.DiscoveryParams{
+		Service:        service,
+		Env:            env,
+		Timestamp:      downloadResult.Timestamp,
+		Profiles:       profileInputs,
+		RepoPrefixes:   parseStringList(args, "repo_prefix"),
+		ContainerRSSMB: getInt(args, "container_rss_mb", 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(downloadResult.Warnings) > 0 {
+		report.Warnings = append(report.Warnings, downloadResult.Warnings...)
+	}
+
+	payload := map[string]any{
+		"command": "pprof discover",
+		"result":  report,
+	}
+	summary := fmt.Sprintf("Discovery complete for %s/%s with %d recommendations.", service, env, len(report.Recommendations))
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func datadogProfilesListTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -715,6 +824,30 @@ func pprofOverheadReportTool(ctx context.Context, args map[string]any) (interfac
 	return marshalJSONWithSummary(summary, payload)
 }
 
+func pprofGenerateReportTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	inputs, err := parseReportInputs(args)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := pprof.GenerateReport(pprof.ReportParams{
+		Title:  getString(args, "title"),
+		Inputs: inputs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof generate_report",
+		"result": map[string]any{
+			"markdown": result.Markdown,
+		},
+	}
+	summary := fmt.Sprintf("Generated report with %d sections.", result.SectionCount)
+	return marshalJSONWithSummary(summary, payload)
+}
+
 func pprofDetectRepoTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	profilePath := getString(args, "profile")
 
@@ -847,6 +980,41 @@ func parseStringList(args map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func parseReportInputs(args map[string]any) ([]pprof.ReportInput, error) {
+	raw, ok := args["inputs"]
+	if !ok {
+		return nil, fmt.Errorf("inputs are required")
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("inputs must be an array")
+	}
+	inputs := make([]pprof.ReportInput, 0, len(items))
+	for idx, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("inputs[%d] must be an object", idx)
+		}
+		kind := getString(entry, "kind")
+		if kind == "" {
+			return nil, fmt.Errorf("inputs[%d] missing kind", idx)
+		}
+		dataRaw, ok := entry["data"]
+		if !ok {
+			return nil, fmt.Errorf("inputs[%d] missing data", idx)
+		}
+		data, ok := dataRaw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("inputs[%d].data must be an object", idx)
+		}
+		inputs = append(inputs, pprof.ReportInput{
+			Kind: kind,
+			Data: data,
+		})
+	}
+	return inputs, nil
 }
 
 func buildDownloadCommand(service, env, outDir string, hours int, site, profileID, eventID string) string {

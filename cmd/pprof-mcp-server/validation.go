@@ -330,6 +330,27 @@ func validateConditionals(toolName string, args map[string]any) error {
 				Hint:     "Provide both profile_id and event_id, or omit both to download the latest profile.",
 			}
 		}
+	case "pprof.discover":
+		profileID := argString(args, "profile_id")
+		eventID := argString(args, "event_id")
+		if profileID != "" && eventID == "" {
+			return &ValidationError{
+				Field:    "event_id",
+				Message:  "missing required argument \"event_id\" when \"profile_id\" is set",
+				Expected: "event_id with profile_id",
+				Received: "<missing>",
+				Hint:     "Provide both profile_id and event_id, or omit both to download the latest profile.",
+			}
+		}
+		if profileID == "" && eventID != "" {
+			return &ValidationError{
+				Field:    "profile_id",
+				Message:  "missing required argument \"profile_id\" when \"event_id\" is set",
+				Expected: "profile_id with event_id",
+				Received: "<missing>",
+				Hint:     "Provide both profile_id and event_id, or omit both to download the latest profile.",
+			}
+		}
 	case "datadog.profiles.pick":
 		strategy := argString(args, "strategy")
 		switch strategy {
