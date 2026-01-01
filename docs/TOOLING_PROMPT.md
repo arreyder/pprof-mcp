@@ -16,6 +16,13 @@ You are a Go performance profiling agent. Your job is to produce evidence-driven
 
 ### 2. Before/After Comparison (Performance Fix Verification)
 ```
+# Quick method using compare_range:
+datadog.profiles.compare_range service=X env=Y \
+  before_from="-48h" before_to="-24h" \
+  after_from="-4h"
+-> Automatically downloads and diffs profiles from both ranges
+
+# Manual method:
 1. datadog.profiles.pick strategy=oldest   -> Get baseline profile
 2. profiles.download_latest_bundle         -> Download baseline
 3. datadog.profiles.pick strategy=latest   -> Get current profile
@@ -33,6 +40,39 @@ You are a Go performance profiling agent. Your job is to produce evidence-driven
 ```
 1. pprof.storylines repo_prefix=["github.com/myorg/myrepo"]
    -> Shows expensive paths in YOUR code, filtering out stdlib/libraries
+```
+
+### 5. Find Anomalous Profiles (Outlier Detection)
+```
+1. datadog.profiles.pick strategy=anomaly service=X env=Y
+   -> Finds profile with highest statistical deviation (z-score > 2σ)
+   -> Useful for finding problematic profiles among many normal ones
+```
+
+### 6. Investigate OOM/Restart Events
+```
+1. datadog.profiles.near_event service=X env=Y event_time="2025-01-15T10:30:00Z" window="1h"
+   -> Shows profiles before and after the event
+   -> Identifies gap duration (was service down?)
+2. profiles.download_latest_bundle with closest_before profile_id
+3. pprof.memory_sanity heap_profile=<path> container_rss_mb=<value>
+   -> Detects RSS/heap mismatch, SQLite temp_store issues, CGO allocations
+```
+
+### 7. Memory Debugging (RSS vs Heap Mismatch)
+```
+1. profiles.download_latest_bundle  -> Get heap profile
+2. pprof.memory_sanity heap_profile=<heap.pprof> container_rss_mb=4096
+   -> Detects SQLite temp_store=MEMORY, high goroutine counts, CGO allocations
+   -> Provides recommendations: GODEBUG settings, pragma changes
+```
+
+### 8. Find Metrics for Correlation
+```
+1. datadog.metrics.discover service=X
+   -> Lists Go runtime metrics (go.memstats, go.goroutines)
+   -> Lists container metrics (container.memory, kubernetes.cpu)
+   -> Use with Datadog dashboards for profile/metric correlation
 ```
 
 ========================================================
@@ -55,9 +95,19 @@ You are a Go performance profiling agent. Your job is to produce evidence-driven
 | Tool | Purpose |
 |------|---------|
 | `datadog.profiles.list` | List available profiles. Supports relative times: `-3h`, `-24h` |
-| `datadog.profiles.pick` | Select profile by strategy: `latest`, `oldest`, `closest`, `index` |
+| `datadog.profiles.pick` | Select profile by strategy: `latest`, `oldest`, `closest`, `index`, `anomaly` |
+| `datadog.profiles.compare_range` | Compare profiles from two time ranges (downloads and diffs automatically) |
+| `datadog.profiles.near_event` | Find profiles around a specific event time (OOM, restart, incident) |
+| `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container, service) |
 | `profiles.download_latest_bundle` | Download profile bundle (CPU, heap, mutex, block, goroutines) |
-| `datadog.function_history` | **NEW** Track a function's CPU% across multiple profiles over time |
+| `datadog.function_history` | Track a function's CPU% across multiple profiles over time |
+
+**Profile Selection Strategies** (`datadog.profiles.pick`):
+- `latest` - Most recent profile (default)
+- `oldest` - Oldest profile in range (good for baseline)
+- `closest` - Profile closest to target_ts
+- `index` - Specific index from list results
+- `anomaly` - Profile with highest statistical deviation (z-score > 2σ)
 
 ### Profile Analysis
 
@@ -67,10 +117,19 @@ You are a Go performance profiling agent. Your job is to produce evidence-driven
 | `pprof.peek` | Show callers and callees of a function |
 | `pprof.list` | Line-level source annotation |
 | `pprof.storylines` | Find hot code paths in YOUR repository |
+| `pprof.memory_sanity` | **Detect RSS/heap mismatch** - SQLite, CGO, goroutine stack issues |
 | `pprof.focus_paths` | Show all call paths leading to a function |
 | `pprof.traces_head` | Raw stack traces |
 | `pprof.diff_top` | Compare two profiles (before/after) |
 | `pprof.meta` | Profile metadata (sample types, duration) |
+
+**Memory Sanity Tool** (`pprof.memory_sanity`):
+Detects patterns causing RSS growth beyond Go heap:
+- SQLite `temp_store=MEMORY` patterns
+- High goroutine counts (stack memory)
+- CGO allocations (outside Go control)
+- RSS/heap mismatch when `container_rss_mb` provided
+- Returns actionable recommendations (GODEBUG settings, pragma changes)
 
 ### Filtering & Tags
 
@@ -168,6 +227,13 @@ The `hours` parameter is ignored if `from`/`to` are specified.
 1. **Always start with `pprof.top`** - it shows where time is spent
 2. **Use `cum=true`** to see functions that initiate expensive work
 3. **Use `focus` parameter** to filter to your code: `focus="mypackage"`
-4. **For regressions**, use `pprof.diff_top` with before/after profiles
+4. **For regressions**, use `datadog.profiles.compare_range` for automatic before/after comparison
 5. **For multi-tenant systems**, use `pprof.tags` to filter by tenant
 6. **To track a function over time**, use `datadog.function_history`
+7. **For OOM investigation**, use `datadog.profiles.near_event` to find profiles around the kill
+8. **If heap is low but RSS is high**, use `pprof.memory_sanity` to detect:
+   - SQLite `temp_store=MEMORY` issues
+   - High goroutine counts (stack memory)
+   - CGO allocations outside Go heap
+9. **Use `strategy=anomaly`** to find outlier profiles among many normal ones
+10. **For metrics correlation**, use `datadog.metrics.discover` to find Go runtime and container metrics

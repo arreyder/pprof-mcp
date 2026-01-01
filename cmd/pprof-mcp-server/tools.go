@@ -320,6 +320,38 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Schema: schema.Tool{
+				Name: "pprof.memory_sanity",
+				Description: `Analyze a heap profile for patterns that cause RSS growth beyond Go heap.
+
+**When to use**: When container RSS is high but Go heap profile shows low memory usage.
+
+**Detects**:
+- SQLite temp_store=MEMORY patterns (RSS grows outside Go heap)
+- High goroutine counts (stack memory not in heap)
+- CGO allocations (memory outside Go control)
+- Memory fragmentation patterns
+- RSS/heap mismatch when container_rss_mb is provided
+
+**Provides**:
+- Suspicions with severity levels (low/medium/high)
+- Actionable recommendations (GODEBUG settings, pragma changes)
+
+**Example use case**: Container OOM but heap profile shows only 124MB. This tool identifies likely causes like temp_store=MEMORY.`,
+				InputSchema: schema.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]json.RawMessage{
+						"heap_profile":      prop("string", "Path to heap profile file (required)"),
+						"goroutine_profile": prop("string", "Optional path to goroutine profile for stack analysis"),
+						"binary":            prop("string", "Path to binary for symbol resolution"),
+						"container_rss_mb":  prop("integer", "Container RSS in MB for mismatch detection"),
+					},
+					Required: []string{"heap_profile"},
+				},
+			},
+			Handler: pprofMemorySanityTool,
+		},
+		{
+			Schema: schema.Tool{
 				Name: "datadog.profiles.list",
 				Description: `List available profiles from Datadog for a service.
 
@@ -358,12 +390,18 @@ func ToolSchemas() []ToolDefinition {
 - oldest: Oldest profile in range (useful for before/after comparisons)
 - closest: Profile closest to target_ts (requires target_ts parameter)
 - index: Specific index from list (requires index parameter, 0-based)
+- anomaly: Profile with highest statistical deviation (z-score > 2σ on CPU/memory/goroutine metrics)
 
 **Workflow for before/after comparison**:
 1. Pick oldest profile: strategy="oldest" for the baseline
 2. Pick latest profile: strategy="latest" for current state
 3. Download both with profiles.download_latest_bundle
-4. Compare with pprof.diff_top`,
+4. Compare with pprof.diff_top
+
+**Workflow for finding problematic profiles**:
+1. Pick anomalous profile: strategy="anomaly" to find outliers
+2. Download with profiles.download_latest_bundle using the profile_id
+3. Analyze with pprof.top or pprof.storylines`,
 				InputSchema: schema.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]json.RawMessage{
@@ -374,7 +412,7 @@ func ToolSchemas() []ToolDefinition {
 						"hours":     prop("integer", "Number of hours to look back (default: 72)"),
 						"limit":     prop("integer", "Maximum profiles to consider (default: 50)"),
 						"site":      prop("string", "Datadog site"),
-						"strategy":  enumProp("string", "Selection strategy: latest (default), oldest, closest (needs target_ts), index (needs index)", []string{"latest", "oldest", "closest", "index"}),
+						"strategy":  enumProp("string", "Selection strategy: latest (default), oldest, closest (needs target_ts), index (needs index), anomaly (finds outliers)", []string{"latest", "oldest", "closest", "index", "anomaly"}),
 						"target_ts": prop("string", "Target timestamp for 'closest' strategy (RFC3339)"),
 						"index":     prop("integer", "Index for 'index' strategy (0-based from list results)"),
 					},
@@ -396,6 +434,105 @@ func ToolSchemas() []ToolDefinition {
 				},
 			},
 			Handler: repoServicesTool,
+		},
+		{
+			Schema: schema.Tool{
+				Name: "datadog.metrics.discover",
+				Description: `Discover available Datadog metrics that match a service filter.
+
+**Use cases**:
+- Find Go runtime metrics (go.memstats, go.goroutines, go.gc) for correlation with profiles
+- Find container/k8s metrics (container.memory, kubernetes.cpu) for RSS investigation
+- Find service-specific metrics for application-level correlation
+
+**Priority order**: Go runtime metrics are shown first, followed by container metrics, then others.
+
+**Example workflow**:
+1. Discover metrics for your service
+2. Use metric names with Datadog dashboards/queries to correlate with profile timestamps`,
+				InputSchema: schema.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]json.RawMessage{
+						"service": prop("string", "The service name to search for related metrics (required)"),
+						"env":     prop("string", "The environment (optional, for context)"),
+						"site":    prop("string", "Datadog site (default: from DD_SITE env or us3.datadoghq.com)"),
+						"query":   prop("string", "Additional metric name pattern to search for"),
+					},
+					Required: []string{"service"},
+				},
+			},
+			Handler: datadogMetricsDiscoverTool,
+		},
+		{
+			Schema: schema.Tool{
+				Name: "datadog.profiles.compare_range",
+				Description: `Compare profiles from two time ranges to identify performance changes.
+
+**When to use**:
+- After a deployment to see what changed
+- To compare "before incident" vs "during incident" profiles
+- To identify performance regressions between releases
+
+**How it works**:
+1. Downloads oldest profile from "before" range (baseline)
+2. Downloads latest profile from "after" range (current state)
+3. Runs pprof diff to show what changed
+4. Returns top function changes with increase/decrease indicators
+
+**Example**: Compare profiles before and after a deploy:
+- before_from="-48h", before_to="-24h" (yesterday's baseline)
+- after_from="-4h", after_to="now" (recent profiles)`,
+				InputSchema: schema.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]json.RawMessage{
+						"service":      prop("string", "The service name (required)"),
+						"env":          prop("string", "The environment (required)"),
+						"site":         prop("string", "Datadog site"),
+						"before_from":  prop("string", "Start of 'before' range (RFC3339 or relative like '-48h') (required)"),
+						"before_to":    prop("string", "End of 'before' range (RFC3339 or relative, default: before_from + 12h)"),
+						"after_from":   prop("string", "Start of 'after' range (RFC3339 or relative like '-4h') (required)"),
+						"after_to":     prop("string", "End of 'after' range (RFC3339 or relative, default: now)"),
+						"out_dir":      prop("string", "Directory to store downloaded profiles (default: temp dir)"),
+						"profile_type": prop("string", "Profile type to compare: cpu, heap, goroutines, mutex, block (default: cpu)"),
+					},
+					Required: []string{"service", "env", "before_from", "after_from"},
+				},
+			},
+			Handler: datadogProfilesCompareRangeTool,
+		},
+		{
+			Schema: schema.Tool{
+				Name: "datadog.profiles.near_event",
+				Description: `Find profiles around a specific event time (restart, OOM, incident, etc.).
+
+**When to use**:
+- Investigating an OOM kill - find the last profile before the kill
+- Analyzing a restart - compare profiles before vs after
+- Debugging an incident - find profiles at a specific timestamp
+
+**Returns**:
+- Profiles BEFORE the event (sorted by timestamp, most recent first)
+- Profiles AFTER the event (sorted by timestamp, oldest first)
+- The closest profile on each side
+- Gap duration (helps identify if service was down)
+
+**Example**: Find profiles around an OOM at 2025-01-15T10:30:00Z:
+- event_time="2025-01-15T10:30:00Z"
+- window="1h" (search 1 hour before and after)`,
+				InputSchema: schema.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]json.RawMessage{
+						"service":    prop("string", "The service name (required)"),
+						"env":        prop("string", "The environment (required)"),
+						"site":       prop("string", "Datadog site"),
+						"event_time": prop("string", "Timestamp of the event (RFC3339 format, required)"),
+						"window":     prop("string", "Time window to search around event (e.g., '30m', '1h', '2h') (default: 1h)"),
+						"limit":      prop("integer", "Max profiles to return per side (default: 10)"),
+					},
+					Required: []string{"service", "env", "event_time"},
+				},
+			},
+			Handler: datadogProfilesNearEventTool,
 		},
 		{
 			Schema: schema.Tool{

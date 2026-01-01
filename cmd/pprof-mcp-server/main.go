@@ -205,6 +205,24 @@ func pprofStorylinesTool(ctx context.Context, args map[string]any) (interface{},
 	return marshalJSON(payload)
 }
 
+func pprofMemorySanityTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunMemorySanity(ctx, pprof.MemorySanityParams{
+		HeapProfile:      getString(args, "heap_profile"),
+		GoroutineProfile: getString(args, "goroutine_profile"),
+		Binary:           getString(args, "binary"),
+		ContainerRSSMB:   getInt(args, "container_rss_mb", 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof memory_sanity",
+		"result":  result,
+	}
+	return marshalJSON(payload)
+}
+
 func datadogProfilesListTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := datadog.ListProfiles(ctx, datadog.ListProfilesParams{
 		Service: getString(args, "service"),
@@ -263,6 +281,70 @@ func repoServicesTool(ctx context.Context, args map[string]any) (interface{}, er
 	payload := map[string]any{
 		"command":  fmt.Sprintf("profctl repo services discover --repo_root %s", repoRoot),
 		"services": items,
+	}
+	return marshalJSON(payload)
+}
+
+func datadogMetricsDiscoverTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := datadog.DiscoverMetrics(ctx, datadog.MetricsDiscoverParams{
+		Service: getString(args, "service"),
+		Env:     getString(args, "env"),
+		Site:    getString(args, "site"),
+		Query:   getString(args, "query"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("profctl datadog metrics discover --service %s", getString(args, "service")),
+		"result":  result,
+		"table":   datadog.FormatMetricsTable(result.Metrics),
+	}
+	return marshalJSON(payload)
+}
+
+func datadogProfilesCompareRangeTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := datadog.CompareRange(ctx, datadog.CompareRangeParams{
+		Service:     getString(args, "service"),
+		Env:         getString(args, "env"),
+		Site:        getString(args, "site"),
+		BeforeFrom:  getString(args, "before_from"),
+		BeforeTo:    getString(args, "before_to"),
+		AfterFrom:   getString(args, "after_from"),
+		AfterTo:     getString(args, "after_to"),
+		OutDir:      getString(args, "out_dir"),
+		ProfileType: getString(args, "profile_type"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command":   "profctl datadog profiles compare_range",
+		"result":    result,
+		"formatted": datadog.FormatCompareResult(result),
+	}
+	return marshalJSON(payload)
+}
+
+func datadogProfilesNearEventTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := datadog.FindProfilesNearEvent(ctx, datadog.NearEventParams{
+		Service:   getString(args, "service"),
+		Env:       getString(args, "env"),
+		Site:      getString(args, "site"),
+		EventTime: getString(args, "event_time"),
+		Window:    getString(args, "window"),
+		Limit:     getInt(args, "limit", 10),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command":   "profctl datadog profiles near_event",
+		"result":    result,
+		"formatted": datadog.FormatNearEventResult(result),
 	}
 	return marshalJSON(payload)
 }
