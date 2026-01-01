@@ -20,6 +20,41 @@ func ToolSchemas() []ToolDefinition {
 	tools := []ToolDefinition{
 		{
 			Tool: &mcp.Tool{
+				Name: "profiles.download",
+				Description: `Smart profile downloader that auto-detects environment.
+
+**When to use**: Default tool for downloading profiles. Automatically detects if you're in:
+- **d2 local development**: Uses kubectl + port-forward to local services
+- **Production/Staging**: Uses Datadog API to download profiles
+
+**Environment Detection**:
+- Checks d2 environment variable (d2=true or D2=true)
+- Routes to appropriate backend automatically
+
+**Parameters**:
+- **d2 mode**: service, out_dir, seconds (optional)
+- **Datadog mode**: service, env, out_dir, hours (optional)
+
+**Returns**: Profile handles for use with all pprof.* analysis tools.
+
+**Tip**: Use this tool unless you need explicit control over the download method.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":    prop("string", "The service name (required)"),
+					"out_dir":    prop("string", "Output directory for downloaded profiles (required)"),
+					"env":        prop("string", "Environment (prod/staging) - only for Datadog mode"),
+					"hours":      integerProp("Hours to look back - only for Datadog mode (default: 72)", intPtr(0), nil),
+					"seconds":    integerProp("CPU profile duration in seconds - only for d2 mode (default: 30)", intPtr(1), intPtr(300)),
+					"dd_site":    prop("string", "Datadog site - only for Datadog mode"),
+					"site":       prop("string", "Datadog site (alias) - only for Datadog mode"),
+					"profile_id": prop("string", "Specific profile ID - only for Datadog mode (use with event_id)"),
+					"event_id":   prop("string", "Specific event ID - only for Datadog mode (required if profile_id is set)"),
+				}, "service", "out_dir"),
+				OutputSchema: profilesDownloadAutoOutputSchema(),
+			},
+			Handler: profilesDownloadAutoTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "profiles.download_latest_bundle",
 				Description: `Download profiling bundle from Datadog for a service.
 
@@ -44,6 +79,35 @@ func ToolSchemas() []ToolDefinition {
 				OutputSchema: downloadLatestBundleOutputSchema(),
 			},
 			Handler: downloadTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "d2.profiles.download",
+				Description: `Download profiling bundle from a d2 local development service.
+
+**When to use**: For profiling services running in your local d2 development environment.
+
+**How it works**:
+1. Discovers the service pod using kubectl
+2. Sets up port-forward to the debug server (port 1337)
+3. Retrieves auth token from the pod
+4. Downloads CPU, heap, mutex, block, goroutine, and allocs profiles
+5. Saves profiles in the same format as Datadog downloads
+
+**Requirements**:
+- kubectl access to the local cluster
+- Service must be running in d2 (deployed by Tilt)
+- Debug server must be enabled on the service
+
+**Returns**: Handle IDs for downloaded .pprof files for use with all pprof.* analysis tools.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service": prop("string", "The service name to download profiles from (e.g., be-innkeeper, pub-api) (required)"),
+					"out_dir": prop("string", "Output directory for downloaded profiles (required)"),
+					"seconds": integerProp("Duration in seconds for CPU profile (default: 30)", intPtr(1), intPtr(300)),
+				}, "service", "out_dir"),
+				OutputSchema: d2DownloadOutputSchema(),
+			},
+			Handler: d2DownloadTool,
 		},
 		{
 			Tool: &mcp.Tool{

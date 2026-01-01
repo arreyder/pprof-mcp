@@ -129,11 +129,17 @@ Or run from source:
 
 ## MCP Tools
 
+### Profile Download (Universal)
+
+| Tool | Description |
+|------|-------------|
+| `profiles.download` | **Smart wrapper** - Auto-detects environment (d2 vs prod/staging) and uses appropriate download method |
+
 ### Datadog Integration
 
 | Tool | Description |
 |------|-------------|
-| `profiles.download_latest_bundle` | Download profile bundle from Datadog |
+| `profiles.download_latest_bundle` | Download profile bundle from Datadog (explicit Datadog mode) |
 | `datadog.profiles.list` | List available profiles (supports relative times like `-3h`) |
 | `datadog.profiles.pick` | Select profile by strategy (latest, oldest, closest_to_ts, manual_index, most_samples, **anomaly**) |
 | `datadog.profiles.aggregate` | Aggregate multiple profiles over a time window into a merged handle |
@@ -141,6 +147,12 @@ Or run from source:
 | `datadog.profiles.near_event` | Find profiles around a specific event (OOM, restart, incident) |
 | `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container) |
 | `datadog.function_history` | Track a function's CPU% across profiles over time |
+
+### Local D2 Development
+
+| Tool | Description |
+|------|-------------|
+| `d2.profiles.download` | Download profiles from local d2 services (uses kubectl + port-forward) |
 
 ### Profile Analysis
 

@@ -52,6 +52,18 @@ func datadogProfilesPickOutputSchema() map[string]any {
 	}, "command", "result")
 }
 
+func profilesDownloadAutoOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "Command executed"),
+		"mode":    prop("string", "Download mode used (d2 or datadog)"),
+		"result": map[string]any{
+			"type":                 "object",
+			"description":          "Download result (schema varies by mode)",
+			"additionalProperties": true,
+		},
+	}, "command", "mode", "result")
+}
+
 func downloadLatestBundleOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command": prop("string", "CLI command equivalent"),
@@ -68,6 +80,20 @@ func downloadLatestBundleOutputSchema() map[string]any {
 			"metrics_path": prop("string", "Path to metrics file"),
 			"warnings":     arrayPropSchema(prop("string", "Warning"), "Warnings"),
 		}, "service", "env", "dd_site", "from_ts", "to_ts", "profile_id", "event_id", "files"),
+	}, "command", "result")
+}
+
+func d2DownloadOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "kubectl commands executed"),
+		"result": NewObjectSchema(map[string]any{
+			"service":   prop("string", "Service name"),
+			"namespace": prop("string", "Kubernetes namespace"),
+			"pod_name":  prop("string", "Pod name"),
+			"pod_ip":    prop("string", "Pod IP address"),
+			"files":     arrayPropSchema(profileFileSchema(), "Downloaded profiles"),
+			"warnings":  arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "service", "namespace", "pod_name", "files"),
 	}, "command", "result")
 }
 
