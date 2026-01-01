@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	debugPort = 1337
+	debugPort = 4421
 )
 
 // DownloadParams contains parameters for downloading profiles from d2

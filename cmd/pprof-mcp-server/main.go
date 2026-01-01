@@ -366,7 +366,7 @@ func d2DownloadTool(ctx context.Context, args map[string]any) (interface{}, erro
 	}
 
 	payload := map[string]any{
-		"command": fmt.Sprintf("kubectl port-forward -n %s %s 1337:1337", result.Namespace, result.PodName),
+		"command": fmt.Sprintf("kubectl port-forward -n %s %s 4421:4421", result.Namespace, result.PodName),
 		"result":  resultPayload,
 	}
 	return marshalJSON(payload)
