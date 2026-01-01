@@ -20,13 +20,14 @@ type AllocPathsParams struct {
 
 // AllocPath represents a single allocation path.
 type AllocPath struct {
-	AllocSite   string   `json:"alloc_site"`   // Where the allocation happens
-	CallerChain []string `json:"caller_chain"` // Call stack leading to allocation
-	AllocBytes  int64    `json:"alloc_bytes"`
-	AllocBytesStr string `json:"alloc_bytes_str"`
-	AllocPct    float64  `json:"alloc_pct"`
-	AllocRate   string   `json:"alloc_rate,omitempty"` // e.g., "45MB/min"
-	FirstAppFrame string `json:"first_app_frame,omitempty"`
+	AllocSite      string   `json:"alloc_site"`                 // Where the allocation happens
+	CallerChain    []string `json:"caller_chain"`               // Call stack leading to allocation
+	AllocBytes     int64    `json:"alloc_bytes"`
+	AllocBytesStr  string   `json:"alloc_bytes_str"`
+	AllocPct       float64  `json:"alloc_pct"`
+	AllocRate      string   `json:"alloc_rate,omitempty"`       // e.g., "45MB/min"
+	FirstAppFrame  string   `json:"first_app_frame,omitempty"`
+	SourceLocation string   `json:"source_location,omitempty"`  // file:line for first app frame
 }
 
 // AllocPathsResult contains the allocation paths analysis.
@@ -119,9 +120,10 @@ func RunAllocPaths(params AllocPathsParams) (AllocPathsResult, error) {
 
 	// Aggregate by allocation site
 	type allocInfo struct {
-		value       int64
-		callerChain []string
-		firstApp    string
+		value          int64
+		callerChain    []string
+		firstApp       string
+		sourceLocation string // file:line for first app frame
 	}
 	allocSites := make(map[string]*allocInfo)
 
@@ -138,6 +140,7 @@ func RunAllocPaths(params AllocPathsParams) (AllocPathsResult, error) {
 		var chain []string
 		var allocSite string
 		var firstApp string
+		var sourceLocation string
 
 		for i, loc := range sample.Location {
 			for _, line := range loc.Line {
@@ -156,11 +159,15 @@ func RunAllocPaths(params AllocPathsParams) (AllocPathsResult, error) {
 				}
 				chain = append(chain, funcName)
 
-				// Track first app frame
+				// Track first app frame with source location
 				if firstApp == "" {
 					for _, prefix := range repoPrefixes {
 						if strings.Contains(funcName, prefix) {
 							firstApp = funcName
+							// Extract source location if available
+							if line.Function.Filename != "" && line.Line > 0 {
+								sourceLocation = fmt.Sprintf("%s:%d", line.Function.Filename, line.Line)
+							}
 							break
 						}
 					}
@@ -208,9 +215,10 @@ func RunAllocPaths(params AllocPathsParams) (AllocPathsResult, error) {
 				chain = chain[:8]
 			}
 			allocSites[key] = &allocInfo{
-				value:       value,
-				callerChain: chain,
-				firstApp:    firstApp,
+				value:          value,
+				callerChain:    chain,
+				firstApp:       firstApp,
+				sourceLocation: sourceLocation,
 			}
 		}
 	}
@@ -223,12 +231,13 @@ func RunAllocPaths(params AllocPathsParams) (AllocPathsResult, error) {
 		}
 
 		path := AllocPath{
-			AllocSite:     site,
-			CallerChain:   info.callerChain,
-			AllocBytes:    info.value,
-			AllocBytesStr: formatValue(info.value, "bytes"),
-			AllocPct:      pct,
-			FirstAppFrame: info.firstApp,
+			AllocSite:      site,
+			CallerChain:    info.callerChain,
+			AllocBytes:     info.value,
+			AllocBytesStr:  formatValue(info.value, "bytes"),
+			AllocPct:       pct,
+			FirstAppFrame:  info.firstApp,
+			SourceLocation: info.sourceLocation,
 		}
 
 		// Calculate rate if duration available
