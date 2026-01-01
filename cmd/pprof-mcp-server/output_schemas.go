@@ -77,6 +77,7 @@ func pprofTopOutputSchema() map[string]any {
 		"raw":     prop("string", "Raw pprof output"),
 		"rows":    arrayPropSchema(pprofTopRowSchema(), "Top rows"),
 		"summary": pprofTopSummarySchema(),
+		"hints":   arrayPropSchema(prop("string", "Hint"), "Contextual hints based on profile type"),
 	}, "command", "raw", "rows", "summary")
 }
 
