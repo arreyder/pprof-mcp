@@ -40,6 +40,25 @@ datadog.profiles.compare_range service=X env=Y \
 ```
 1. pprof.storylines repo_prefix=["github.com/myorg/myrepo"]
    -> Shows expensive paths in YOUR code, filtering out stdlib/libraries
+   -> Auto-detects heap profiles and uses alloc_space for allocation hot spots
+```
+
+### 4a. Analyze Allocation Hot Spots (Heap Profiles)
+```
+1. pprof.top profile=heap.pprof sample_index=alloc_space
+   -> Shows allocation hot spots (not just in-use memory)
+2. pprof.alloc_paths profile=heap.pprof min_percent=2
+   -> Shows allocation paths with rates (MB/min) and caller chains
+3. pprof.peek profile=heap.pprof regex="MyFunc" sample_index=alloc_space
+   -> IMPORTANT: Use sample_index=alloc_space for heap profiles!
+```
+
+### 4b. Detect Observability Overhead
+```
+1. pprof.overhead_report profile=cpu.pprof
+   -> Breaks down overhead by category: OTel, zap, gRPC, protobuf, etc.
+   -> Shows severity ratings and actionable suggestions
+   -> Useful for understanding infrastructure vs application CPU/memory
 ```
 
 ### 5. Find Anomalous Profiles (Outlier Detection)
@@ -113,10 +132,13 @@ datadog.profiles.compare_range service=X env=Y \
 
 | Tool | Purpose |
 |------|---------|
-| `pprof.top` | Show top functions by CPU/memory. Start here. |
-| `pprof.peek` | Show callers and callees of a function |
+| `pprof.top` | Show top functions by CPU/memory. Start here. Returns contextual hints. |
+| `pprof.peek` | Show callers and callees of a function. Use `sample_index=alloc_space` for heap! |
 | `pprof.list` | Line-level source annotation |
-| `pprof.storylines` | Find hot code paths in YOUR repository |
+| `pprof.storylines` | Find hot code paths in YOUR repository. Auto-detects heap profiles. |
+| `pprof.alloc_paths` | **Analyze allocation paths** with rates (MB/min), filtering, caller chains |
+| `pprof.overhead_report` | **Detect observability overhead** - OTel, zap, gRPC, protobuf breakdown |
+| `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | **Detect RSS/heap mismatch** - SQLite, CGO, goroutine stack issues |
 | `pprof.focus_paths` | Show all call paths leading to a function |
 | `pprof.traces_head` | Raw stack traces |
@@ -130,6 +152,27 @@ Detects patterns causing RSS growth beyond Go heap:
 - CGO allocations (outside Go control)
 - RSS/heap mismatch when `container_rss_mb` provided
 - Returns actionable recommendations (GODEBUG settings, pragma changes)
+
+**Allocation Paths Tool** (`pprof.alloc_paths`):
+Analyzes heap profiles with intelligent filtering:
+- Shows allocation rates (MB/min) not just totals
+- Filters by percentage threshold (`min_percent`)
+- Groups by allocation site with full caller chains
+- Auto-detects repository prefixes
+
+**Overhead Report Tool** (`pprof.overhead_report`):
+Detects observability and infrastructure overhead:
+- OpenTelemetry tracing, zap/logrus logging, Prometheus metrics
+- gRPC framework, protobuf serialization, JSON encoding
+- Runtime/GC overhead
+- Returns severity ratings (low/medium/high) and actionable suggestions
+
+**Repo Detection Tool** (`pprof.detect_repo`):
+Auto-detects repository from profile:
+- Extracts Go module paths from function names
+- Searches common locations for local repo
+- Validates by checking go.mod
+- Returns confidence level (high/medium/low)
 
 ### Filtering & Tags
 
@@ -166,7 +209,10 @@ pprof.list --profile <cpu.pprof> --function <hot_function> --repo_root .
 ```
 pprof.top --profile <heap.pprof> --sample_index alloc_space
 pprof.top --profile <heap.pprof> --sample_index inuse_space
+pprof.alloc_paths --profile <heap.pprof> --min_percent 2
+pprof.peek --profile <heap.pprof> --regex <hot_function> --sample_index alloc_space
 ```
+**IMPORTANT**: For heap profiles, always use `sample_index=alloc_space` with peek/top to see allocation hot spots. The default `inuse_space` only shows retained memory.
 
 ### 1.3) Contention + Blocking
 ```
@@ -224,7 +270,7 @@ The `hours` parameter is ignored if `from`/`to` are specified.
 ========================================================
 ## TIPS
 
-1. **Always start with `pprof.top`** - it shows where time is spent
+1. **Always start with `pprof.top`** - it shows where time is spent and returns contextual hints
 2. **Use `cum=true`** to see functions that initiate expensive work
 3. **Use `focus` parameter** to filter to your code: `focus="mypackage"`
 4. **For regressions**, use `datadog.profiles.compare_range` for automatic before/after comparison
@@ -237,3 +283,14 @@ The `hours` parameter is ignored if `from`/`to` are specified.
    - CGO allocations outside Go heap
 9. **Use `strategy=anomaly`** to find outlier profiles among many normal ones
 10. **For metrics correlation**, use `datadog.metrics.discover` to find Go runtime and container metrics
+11. **For heap profiles**, always use `sample_index=alloc_space` with peek/top:
+    - Default `inuse_space` only shows retained memory
+    - `alloc_space` shows allocation hot spots (what's creating garbage)
+12. **Use `pprof.alloc_paths`** for detailed allocation analysis:
+    - Shows allocation rates (MB/min) not just totals
+    - Filters to significant allocations with `min_percent`
+    - Shows full caller chains to understand where allocations originate
+13. **Use `pprof.overhead_report`** to understand infrastructure vs app overhead:
+    - Breaks down OTel, logging, gRPC, protobuf overhead
+    - Provides actionable suggestions for high-overhead categories
+14. **Use `pprof.detect_repo`** to auto-detect local repo for source annotation

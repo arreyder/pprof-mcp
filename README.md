@@ -141,10 +141,13 @@ Or run from source:
 
 | Tool | Description |
 |------|-------------|
-| `pprof.top` | Show top functions by CPU/memory |
-| `pprof.peek` | Show callers and callees |
+| `pprof.top` | Show top functions by CPU/memory (includes contextual hints) |
+| `pprof.peek` | Show callers and callees (use `sample_index=alloc_space` for heap) |
 | `pprof.list` | Line-level source annotation |
-| `pprof.storylines` | Find hot code paths in your repository |
+| `pprof.storylines` | Find hot code paths in your repository (auto-detects heap profiles) |
+| `pprof.alloc_paths` | Analyze allocation paths with rates (MB/min) and caller chains |
+| `pprof.overhead_report` | Detect observability overhead (OTel, zap, gRPC, protobuf) |
+| `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | Detect RSS/heap mismatch patterns (SQLite, CGO, goroutines) |
 | `pprof.diff_top` | Compare two profiles |
 | `pprof.focus_paths` | Show all call paths to a function |
