@@ -8,4 +8,4 @@ I need to understand what's happening with `{{SERVICE}}` in `{{ENV}}`. I've neve
 4. Are there any obvious optimization opportunities?
 5. Is there any contention or blocking I should know about?
 
-Please download the latest profiles and give me a comprehensive analysis. Start broad and drill into anything interesting you find.
+Please download the latest profiles and give me a comprehensive analysis (you can use `pprof.discover`). Start broad and drill into anything interesting you find.

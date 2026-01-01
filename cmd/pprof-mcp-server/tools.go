@@ -60,13 +60,18 @@ func ToolSchemas() []ToolDefinition {
 
 **Returns**: Structured data with function names, flat/cumulative values, and percentages.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"profile":      ProfilePath(),
-					"binary":       BinaryPathOptional(),
-					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
-					"nodecount":    integerProp("Maximum number of nodes to show (default: 10)", intPtr(0), nil),
-					"focus":        prop("string", "Regex to focus on specific functions"),
-					"ignore":       prop("string", "Regex to ignore specific functions"),
-					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
+					"profile":          ProfilePath(),
+					"binary":           BinaryPathOptional(),
+					"cum":              prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
+					"nodecount":        integerProp("Maximum number of nodes to show (default: 10)", intPtr(0), nil),
+					"focus":            prop("string", "Regex to focus on specific functions"),
+					"ignore":           prop("string", "Regex to ignore specific functions"),
+					"sample_index":     prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
+					"compare_baseline": prop("boolean", "Compare against stored baseline metrics and update baseline (default: false)"),
+					"baseline_key":     prop("string", "Optional baseline key to scope historical comparisons"),
+					"baseline_path":    prop("string", "Optional path to baseline store file (default: .pprof-mcp-baselines.json)"),
+					"service":          prop("string", "Service name (optional; used for baseline key)"),
+					"env":              prop("string", "Environment (optional; used for baseline key)"),
 				}, "profile"),
 				OutputSchema: pprofTopOutputSchema(),
 			},
@@ -168,6 +173,27 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "pprof.regression_check",
+				Description: `Check whether specific functions exceed regression thresholds.
+
+**When to use**: CI or automated checks for performance regressions in a profile.
+
+**Returns**: Pass/fail and per-check details.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile":      ProfilePath(),
+					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, delay)"),
+					"checks": arrayPropMin(NewObjectSchema(map[string]any{
+						"function": prop("string", "Function regex to check (required)"),
+						"metric":   enumProp("string", "Metric to compare (flat_pct or cum_pct)", []string{"flat_pct", "cum_pct"}),
+						"max":      numberProp("Maximum allowed percent (required)", floatPtr(0), nil),
+					}, "function", "metric", "max"), "Regression checks", 1),
+				}, "profile", "checks"),
+				OutputSchema: pprofRegressionCheckOutputSchema(),
+			},
+			Handler: pprofRegressionCheckTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name:        "pprof.meta",
 				Description: "Extract metadata from a pprof profile including sample types, duration, drop frames, and comments. Useful for understanding what data is available in a profile.",
 				InputSchema: NewObjectSchema(map[string]any{
@@ -248,6 +274,21 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "pprof.contention_analysis",
+				Description: `Analyze mutex/block profiles to identify lock contention patterns.
+
+**When to use**: After downloading mutex or block profiles to understand contention hotspots.
+
+**Returns**: Total contention metrics, top lock sites, waiting functions, patterns, and recommendations.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+				}, "profile"),
+				OutputSchema: pprofContentionAnalysisOutputSchema(),
+			},
+			Handler: pprofContentionAnalysisTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "pprof.discover",
 				Description: `Run a comprehensive discovery analysis for a service and return a structured report.
 
@@ -269,6 +310,38 @@ func ToolSchemas() []ToolDefinition {
 				OutputSchema: pprofDiscoverOutputSchema(),
 			},
 			Handler: pprofDiscoverTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.cross_correlate",
+				Description: `Cross-correlate hotspots across CPU, heap, and mutex profiles from the same bundle.
+
+**When to use**: To identify functions that are hot in multiple profile types.
+
+**Input**: Provide a bundle handle (any profile handle from profiles.download_latest_bundle) or the bundle file list.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"bundle":    bundleInputSchema(),
+					"nodecount": integerProp("Top N rows to consider per profile (default: 20)", intPtr(0), nil),
+				}, "bundle"),
+				OutputSchema: pprofCrossCorrelateOutputSchema(),
+			},
+			Handler: pprofCrossCorrelateTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.hotspot_summary",
+				Description: `Summarize top hotspots across CPU, heap, and mutex profiles in one call.
+
+**When to use**: Quick overview of top 3-5 functions across each profile type.
+
+**Input**: Provide a bundle handle (any profile handle from profiles.download_latest_bundle) or the bundle file list.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"bundle":    bundleInputSchema(),
+					"nodecount": integerProp("Top N rows per profile (default: 5)", intPtr(0), nil),
+				}, "bundle"),
+				OutputSchema: pprofHotspotSummaryOutputSchema(),
+			},
+			Handler: pprofHotspotSummaryTool,
 		},
 		{
 			Tool: &mcp.Tool{
@@ -335,6 +408,27 @@ func ToolSchemas() []ToolDefinition {
 				OutputSchema: datadogProfilesPickOutputSchema(),
 			},
 			Handler: datadogProfilesPickTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "datadog.profiles.aggregate",
+				Description: `Aggregate multiple profiles over a time window into a merged profile.
+
+**When to use**: Merge multiple profiles for a more stable signal.
+
+**Returns**: Handle to the merged profile.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":      prop("string", "The service name (required)"),
+					"env":          prop("string", "The environment (required)"),
+					"window":       prop("string", "Time window to aggregate (e.g., '1h', '30m') (required)"),
+					"limit":        integerProp("Maximum profiles to merge (default: 10)", intPtr(0), nil),
+					"site":         prop("string", "Datadog site"),
+					"out_dir":      prop("string", "Output directory for downloaded profiles"),
+					"profile_type": enumProp("string", "Profile type to aggregate (default: cpu)", []string{"cpu", "heap", "mutex", "block", "goroutines"}),
+				}, "service", "env", "window"),
+				OutputSchema: datadogProfilesAggregateOutputSchema(),
+			},
+			Handler: datadogProfilesAggregateTool,
 		},
 		{
 			Tool: &mcp.Tool{

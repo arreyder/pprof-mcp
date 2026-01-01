@@ -17,6 +17,7 @@ var pathArgKeys = map[string]bool{
 	"goroutine_profile": true,
 	"before":            true,
 	"after":             true,
+	"baseline_path":     true,
 }
 
 var pathSliceArgKeys = map[string]bool{

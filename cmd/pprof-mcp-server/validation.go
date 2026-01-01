@@ -26,9 +26,15 @@ func (e *ValidationError) Error() string {
 // It supports simple union types (e.g., string|array) and applies tool-specific
 // conditional requirements that JSON Schema alone cannot express here.
 func ValidateArgs(tool *mcp.Tool, args map[string]any) error {
+	return ValidateArgsWithName(tool, tool.Name, args)
+}
+
+// ValidateArgsWithName allows callers to validate against a canonical tool name
+// that may differ from the registered name (e.g., compatibility wrappers).
+func ValidateArgsWithName(tool *mcp.Tool, name string, args map[string]any) error {
 	schema, ok := tool.InputSchema.(map[string]any)
 	if !ok {
-		return fmt.Errorf("invalid input schema for tool %q", tool.Name)
+		return fmt.Errorf("invalid input schema for tool %q", name)
 	}
 	if args == nil {
 		args = map[string]any{}
@@ -36,7 +42,7 @@ func ValidateArgs(tool *mcp.Tool, args map[string]any) error {
 	if err := validateObject(args, schema, ""); err != nil {
 		return err
 	}
-	return validateConditionals(tool.Name, args)
+	return validateConditionals(name, args)
 }
 
 func validateObject(value map[string]any, schema map[string]any, path string) error {

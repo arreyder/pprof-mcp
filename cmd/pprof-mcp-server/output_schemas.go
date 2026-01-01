@@ -73,12 +73,31 @@ func downloadLatestBundleOutputSchema() map[string]any {
 
 func pprofTopOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
-		"command": prop("string", "pprof command"),
-		"raw":     prop("string", "Raw pprof output"),
-		"rows":    arrayPropSchema(pprofTopRowSchema(), "Top rows"),
-		"summary": pprofTopSummarySchema(),
-		"hints":   arrayPropSchema(prop("string", "Hint"), "Contextual hints based on profile type"),
+		"command":  prop("string", "pprof command"),
+		"raw":      prop("string", "Raw pprof output"),
+		"rows":     arrayPropSchema(pprofTopRowSchema(), "Top rows"),
+		"summary":  pprofTopSummarySchema(),
+		"hints":    arrayPropSchema(prop("string", "Hint"), "Contextual hints based on profile type"),
+		"baseline": baselineComparisonSchema(),
 	}, "command", "raw", "rows", "summary")
+}
+
+func baselineComparisonSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"key":              prop("string", "Baseline key"),
+		"profile_kind":     prop("string", "Detected profile kind"),
+		"sample_index":     prop("string", "Sample index used for baseline"),
+		"baseline_samples": prop("integer", "Number of profiles in baseline"),
+		"deviations": arrayPropSchema(NewObjectSchema(map[string]any{
+			"function": prop("string", "Function name"),
+			"metric":   prop("string", "Metric compared"),
+			"current":  prop("number", "Current value"),
+			"baseline": prop("number", "Baseline average"),
+			"delta":    prop("number", "Difference from baseline"),
+			"severity": prop("string", "Severity"),
+		}, "function", "metric", "current", "baseline", "delta", "severity"), "Baseline deviations"),
+		"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+	}, "key", "profile_kind", "baseline_samples", "deviations")
 }
 
 func pprofTopRowSchema() map[string]any {
@@ -235,4 +254,128 @@ func functionDiffSchema() map[string]any {
 		"change":      prop("string", "Change summary"),
 		"severity":    prop("string", "Severity"),
 	}, "function", "before_flat", "after_flat", "change", "severity")
+}
+
+func pprofContentionAnalysisOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"profile_type":      prop("string", "Profile type (mutex or block)"),
+			"total_contentions": prop("integer", "Total contention count"),
+			"total_delay":       prop("string", "Total delay across contentions"),
+			"by_lock_site": arrayPropSchema(NewObjectSchema(map[string]any{
+				"lock_site":       prop("string", "Lock function"),
+				"source_location": prop("string", "Source location for lock site"),
+				"contentions":     prop("integer", "Contention count"),
+				"total_delay":     prop("string", "Total delay"),
+				"avg_delay":       prop("string", "Average delay"),
+				"top_waiters": arrayPropSchema(NewObjectSchema(map[string]any{
+					"function": prop("string", "Waiting function"),
+					"delay":    prop("string", "Total delay"),
+				}, "function", "delay"), "Top waiting functions"),
+			}, "lock_site", "contentions", "total_delay", "avg_delay", "top_waiters"), "Contention by lock site"),
+			"patterns": arrayPropSchema(NewObjectSchema(map[string]any{
+				"type":        prop("string", "Pattern type"),
+				"severity":    prop("string", "Severity"),
+				"description": prop("string", "Description"),
+			}, "type", "severity", "description"), "Detected patterns"),
+			"recommendations": arrayPropSchema(prop("string", "Recommendation"), "Recommendations"),
+			"warnings":        arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "profile_type", "total_contentions", "total_delay", "by_lock_site", "patterns", "recommendations"),
+	}, "command", "result")
+}
+
+func pprofCrossCorrelateOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"correlations": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":       prop("string", "Function name"),
+				"combined_score": prop("number", "Combined score"),
+				"cpu": NewObjectSchema(map[string]any{
+					"flat_pct": prop("number", "CPU flat percent"),
+					"rank":     prop("integer", "Rank in CPU top list"),
+				}, "flat_pct", "rank"),
+				"heap": NewObjectSchema(map[string]any{
+					"alloc_pct": prop("number", "Allocation percent"),
+					"rank":      prop("integer", "Rank in heap top list"),
+				}, "alloc_pct", "rank"),
+				"mutex": NewObjectSchema(map[string]any{
+					"delay_pct": prop("number", "Contention delay percent"),
+					"rank":      prop("integer", "Rank in mutex top list"),
+				}, "delay_pct", "rank"),
+				"insight": prop("string", "Insight summary"),
+			}, "function", "combined_score", "insight"), "Cross-profile correlations"),
+			"cpu_only_hotspots": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function": prop("string", "Function name"),
+				"flat_pct": prop("number", "CPU flat percent"),
+			}, "function", "flat_pct"), "CPU-only hotspots"),
+			"heap_only_hotspots": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":  prop("string", "Function name"),
+				"alloc_pct": prop("number", "Heap allocation percent"),
+			}, "function", "alloc_pct"), "Heap-only hotspots"),
+			"mutex_only_hotspots": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":  prop("string", "Function name"),
+				"delay_pct": prop("number", "Mutex delay percent"),
+			}, "function", "delay_pct"), "Mutex-only hotspots"),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "correlations", "cpu_only_hotspots", "heap_only_hotspots", "mutex_only_hotspots"),
+	}, "command", "result")
+}
+
+func pprofHotspotSummaryOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"cpu_top5": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function": prop("string", "Function name"),
+				"flat_pct": prop("number", "CPU flat percent"),
+			}, "function", "flat_pct"), "Top CPU hotspots"),
+			"heap_top5": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":  prop("string", "Function name"),
+				"alloc_pct": prop("number", "Heap allocation percent"),
+			}, "function", "alloc_pct"), "Top heap hotspots"),
+			"mutex_top5": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":  prop("string", "Function name"),
+				"delay_pct": prop("number", "Mutex delay percent"),
+			}, "function", "delay_pct"), "Top mutex hotspots"),
+			"goroutine_count": prop("integer", "Total goroutines"),
+			"warnings":        arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "cpu_top5", "heap_top5", "mutex_top5"),
+	}, "command", "result")
+}
+
+func pprofRegressionCheckOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "pprof command"),
+		"result": NewObjectSchema(map[string]any{
+			"passed": prop("boolean", "Overall pass/fail"),
+			"checks": arrayPropSchema(NewObjectSchema(map[string]any{
+				"function":  prop("string", "Function pattern"),
+				"metric":    prop("string", "Metric checked"),
+				"threshold": prop("number", "Threshold value"),
+				"actual":    prop("number", "Actual value"),
+				"passed":    prop("boolean", "Whether check passed"),
+				"message":   prop("string", "Failure message"),
+			}, "function", "metric", "threshold", "actual", "passed"), "Check results"),
+		}, "passed", "checks"),
+	}, "command", "result")
+}
+
+func datadogProfilesAggregateOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "CLI command equivalent"),
+		"result": NewObjectSchema(map[string]any{
+			"handle":          prop("string", "Handle for merged profile"),
+			"profile_type":    prop("string", "Profile type"),
+			"profiles_merged": prop("integer", "Number of profiles merged"),
+			"time_range": NewObjectSchema(map[string]any{
+				"from": prop("string", "Start time"),
+				"to":   prop("string", "End time"),
+			}, "from", "to"),
+			"total_duration": prop("string", "Total duration of merged profile"),
+			"hint":           prop("string", "Usage hint"),
+			"warnings":       arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "handle", "profiles_merged", "time_range"),
+	}, "command", "result")
 }

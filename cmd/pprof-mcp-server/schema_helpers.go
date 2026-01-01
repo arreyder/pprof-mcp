@@ -100,3 +100,15 @@ func ProfilePath() map[string]any {
 func BinaryPathOptional() map[string]any {
 	return prop("string", "Path to the binary for symbol resolution")
 }
+
+func bundleInputSchema() map[string]any {
+	return map[string]any{
+		"type":        []string{"string", "array"},
+		"description": "Bundle handle (any profile handle) or list of bundle file handles",
+		"items": NewObjectSchema(map[string]any{
+			"type":   prop("string", "Profile type (cpu, heap, mutex, block, goroutines)"),
+			"handle": prop("string", "Profile handle from profiles.download_latest_bundle"),
+			"bytes":  prop("integer", "Profile size in bytes"),
+		}, "handle"),
+	}
+}
