@@ -6,7 +6,7 @@ Future improvements identified during discovery analysis sessions.
 
 ## High Value Improvements
 
-### 1. Add `pprof.discover` Meta-Tool
+### 1. [x] Add `pprof.discover` Meta-Tool
 
 **Effort:** High
 **Value:** Very High
@@ -65,7 +65,7 @@ pprof.discover(service="temporal_sync", env="prod-usw2")
 
 ---
 
-### 2. Add Goroutine Analysis Tool
+### 2. [x] Add Goroutine Analysis Tool
 
 **Effort:** Medium
 **Value:** High
@@ -108,7 +108,7 @@ Create `pprof.goroutine_analysis` to detect goroutine leaks and blocking pattern
 
 ---
 
-### 3. Profile Handle Abstraction
+### 3. [x] Profile Handle Abstraction
 
 **Effort:** High
 **Value:** Medium
@@ -155,7 +155,7 @@ Add historical context to analysis results.
 
 ---
 
-### 5. Summary/Report Generation
+### 5. [x] Summary/Report Generation
 
 **Effort:** Medium
 **Value:** Medium
@@ -176,7 +176,7 @@ Add `pprof.generate_report` that formats analysis results as markdown.
 
 ## Low Value Improvements
 
-### 6. Auto-Suggest Tags/Tenant Analysis
+### 6. [x] Auto-Suggest Tags/Tenant Analysis
 
 **Effort:** Low
 **Value:** Low

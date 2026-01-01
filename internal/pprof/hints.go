@@ -1,7 +1,9 @@
 package pprof
 
 import (
+	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/google/pprof/profile"
@@ -20,6 +22,13 @@ func GenerateProfileHints(profilePath string, usedSampleIndex string) []string {
 	prof, err := profile.Parse(file)
 	if err != nil {
 		return hints
+	}
+
+	labelKeys := collectLabelKeys(prof.Sample)
+	if len(labelKeys) > 0 {
+		if hint := tagHint(labelKeys); hint != "" {
+			hints = append(hints, hint)
+		}
 	}
 
 	kind := detectProfileKind(prof)
@@ -80,6 +89,30 @@ func GenerateProfileHints(profilePath string, usedSampleIndex string) []string {
 	}
 
 	return hints
+}
+
+func tagHint(labelKeys []string) string {
+	known := []string{}
+	for _, key := range labelKeys {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "tenant") ||
+			strings.Contains(lower, "connector") ||
+			strings.Contains(lower, "workspace") ||
+			strings.Contains(lower, "account") ||
+			strings.Contains(lower, "org") ||
+			strings.Contains(lower, "customer") {
+			known = append(known, key)
+		}
+	}
+	if len(known) == 0 {
+		return ""
+	}
+	sort.Strings(known)
+	if len(known) > 3 {
+		known = known[:3]
+	}
+	return fmt.Sprintf("Profile contains %s labels. Use pprof.tags to analyze per-tenant or per-connector hotspots.",
+		strings.Join(known, ", "))
 }
 
 // GenerateOverheadHints generates hints based on detected overhead.

@@ -30,7 +30,7 @@ func ToolSchemas() []ToolDefinition {
 2. Use datadog.profiles.pick to select a specific profile (by time, strategy, etc.)
 3. Use this tool with the profile_id and event_id to download
 
-**Returns**: Paths to downloaded .pprof files for use with other pprof.* tools.`,
+**Returns**: Handle IDs for downloaded .pprof files for use with other pprof.* tools.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"service":    prop("string", "The service name to download profiles for (required)"),
 					"env":        prop("string", "The environment (e.g., prod, staging) (required)"),
@@ -154,8 +154,8 @@ func ToolSchemas() []ToolDefinition {
 
 **Returns**: Delta showing which functions improved/regressed and by how much.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"before":       prop("string", "Path to the baseline pprof profile (required)"),
-					"after":        prop("string", "Path to the comparison pprof profile (required)"),
+					"before":       prop("string", "Path or handle for the baseline pprof profile (required)"),
+					"after":        prop("string", "Path or handle for the comparison pprof profile (required)"),
 					"binary":       BinaryPathOptional(),
 					"cum":          prop("boolean", "Sort by cumulative value instead of flat (default: false)"),
 					"nodecount":    integerProp("Maximum number of nodes to show", intPtr(0), nil),
@@ -223,13 +223,52 @@ func ToolSchemas() []ToolDefinition {
 
 **Example use case**: Container OOM but heap profile shows only 124MB. This tool identifies likely causes like temp_store=MEMORY.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"heap_profile":      prop("string", "Path to heap profile file (required)"),
-					"goroutine_profile": prop("string", "Optional path to goroutine profile for stack analysis"),
+					"heap_profile":      prop("string", "Path or handle to heap profile file (required)"),
+					"goroutine_profile": prop("string", "Optional path or handle to goroutine profile for stack analysis"),
 					"binary":            BinaryPathOptional(),
 					"container_rss_mb":  integerProp("Container RSS in MB for mismatch detection", intPtr(0), nil),
 				}, "heap_profile"),
 			},
 			Handler: pprofMemorySanityTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.goroutine_analysis",
+				Description: `Analyze goroutine profiles to detect leaks, blocking patterns, and anomalous wait states.
+
+**When to use**: After downloading goroutine profiles to check for goroutine leaks or excessive blocking.
+
+**Returns**: Total goroutine count, state distribution, top wait reasons, and potential leak signatures.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+				}, "profile"),
+				OutputSchema: pprofGoroutineAnalysisOutputSchema(),
+			},
+			Handler: pprofGoroutineAnalysisTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.discover",
+				Description: `Run a comprehensive discovery analysis for a service and return a structured report.
+
+**When to use**: End-to-end profiling discovery. Downloads CPU, heap, mutex, block, and goroutine profiles and runs the analysis suite.
+
+**Returns**: Structured report with CPU utilization, overhead categories, allocation rates, contention, goroutine analysis, and recommendations.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":          prop("string", "The service name to analyze (required)"),
+					"env":              prop("string", "The environment (e.g., prod, staging) (required)"),
+					"out_dir":          prop("string", "Output directory for downloaded profiles (optional; temp dir if omitted)"),
+					"hours":            integerProp("Number of hours to look back for profiles (default: 72)", intPtr(0), nil),
+					"dd_site":          prop("string", "Datadog site (e.g., datadoghq.com, datadoghq.eu) (alias: site)"),
+					"site":             prop("string", "Datadog site (preferred; alias: dd_site)"),
+					"profile_id":       prop("string", "Specific profile ID to download (use with event_id)"),
+					"event_id":         prop("string", "Specific event ID to download (required if profile_id is set)"),
+					"repo_prefix":      arrayOrStringPropSchema(prop("string", "Repository prefix"), "Repository path prefixes to identify your code (string or list)"),
+					"container_rss_mb": integerProp("Container RSS in MB for heap mismatch detection", intPtr(0), nil),
+				}, "service", "env"),
+				OutputSchema: pprofDiscoverOutputSchema(),
+			},
+			Handler: pprofDiscoverTool,
 		},
 		{
 			Tool: &mcp.Tool{
@@ -502,7 +541,7 @@ func ToolSchemas() []ToolDefinition {
 
 **Output**: A new .pprof file that can be analyzed with other pprof.* tools.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"profiles":    arrayOrStringPropMin(prop("string", "Profile path"), "List of profile paths to merge (required, minimum 2)", 2),
+					"profiles":    arrayOrStringPropMin(prop("string", "Profile path or handle"), "List of profile paths/handles to merge (required, minimum 2)", 2),
 					"output_path": prop("string", "Path to write the merged profile (required)"),
 					"binary":      BinaryPathOptional(),
 				}, "profiles", "output_path"),
@@ -593,6 +632,29 @@ func ToolSchemas() []ToolDefinition {
 				}, "profile"),
 			},
 			Handler: pprofOverheadReportTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.generate_report",
+				Description: `Generate a markdown report from one or more analysis results.
+
+**When to use**: After running pprof.discover or individual tools, to create a formatted report with tables and recommendations.
+
+**Input format**: Provide each tool's structured output as the "data" field. You can pass either the tool's full JSON output or just its "result" object.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"title": prop("string", "Optional report title"),
+					"inputs": arrayPropSchema(NewObjectSchema(map[string]any{
+						"kind": prop("string", "Input kind (discover, top, alloc_paths, memory_sanity, overhead_report, goroutine_analysis)"),
+						"data": map[string]any{
+							"type":                 "object",
+							"description":          "Structured tool output for the given kind",
+							"additionalProperties": true,
+						},
+					}, "kind", "data"), "Analysis inputs (required)"),
+				}, "inputs"),
+				OutputSchema: pprofGenerateReportOutputSchema(),
+			},
+			Handler: pprofGenerateReportTool,
 		},
 		{
 			Tool: &mcp.Tool{
