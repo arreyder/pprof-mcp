@@ -97,6 +97,28 @@ func d2DownloadOutputSchema() map[string]any {
 	}, "command", "result")
 }
 
+func d2BranchImpactOutputSchema() map[string]any {
+	downloadResultSchema := NewObjectSchema(map[string]any{
+		"service":   prop("string", "Service name"),
+		"namespace": prop("string", "Kubernetes namespace"),
+		"pod_name":  prop("string", "Pod name"),
+		"pod_ip":    prop("string", "Pod IP address"),
+		"files":     arrayPropSchema(profileFileSchema(), "Downloaded profiles"),
+		"warnings":  arrayPropSchema(prop("string", "Warning"), "Warnings"),
+	}, "service", "namespace", "pod_name", "files")
+
+	return NewObjectSchema(map[string]any{
+		"service":         prop("string", "Service name"),
+		"before_ref":      prop("string", "Git ref used for baseline"),
+		"after_ref":       prop("string", "Git ref used for comparison"),
+		"before_profiles": downloadResultSchema,
+		"after_profiles":  downloadResultSchema,
+		"update_method":   prop("string", "Update method detected: live_update, pod_restart, or pod_recreate"),
+		"git_stashed":     prop("boolean", "Whether uncommitted changes were stashed"),
+		"warnings":        arrayPropSchema(prop("string", "Warning"), "Warnings"),
+	}, "service", "before_ref", "after_ref", "before_profiles", "after_profiles", "update_method", "git_stashed")
+}
+
 func pprofTopOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command":  prop("string", "pprof command"),
