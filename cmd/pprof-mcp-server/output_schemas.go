@@ -140,7 +140,13 @@ func pprofDiscoverOutputSchema() map[string]any {
 				"handle": prop("string", "Profile handle"),
 				"bytes":  prop("integer", "File size in bytes"),
 			}, "type", "handle"), "Downloaded profile handles"),
-		}, map[string]any{"type": "object"}, "service", "env"),
+			"recommendations": arrayPropSchema(NewObjectSchema(map[string]any{
+				"priority":   prop("string", "Recommendation priority"),
+				"area":       prop("string", "Area of concern"),
+				"suggestion": prop("string", "Suggested action"),
+			}, "priority", "area", "suggestion"), "Prioritized recommendations"),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, true, "service", "env"),
 	}, "command", "result")
 }
 
