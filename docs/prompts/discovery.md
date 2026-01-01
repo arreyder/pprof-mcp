@@ -1,6 +1,6 @@
-# pprof-mcp Demo: First Look at an Unknown Service
+# Service Discovery Analysis
 
-I need to understand what's happening with the `temporal_worker` service in `prod-usw2`. I've never looked at this service before and want to understand:
+I need to understand what's happening with `{{SERVICE}}` in `{{ENV}}`. I've never looked at this service before and want to understand:
 
 1. What is this service spending its time on?
 2. Is there significant observability/infrastructure overhead?
