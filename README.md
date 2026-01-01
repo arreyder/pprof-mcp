@@ -149,10 +149,12 @@ Or run from source:
 | `pprof.top` | Show top functions by CPU/memory (includes contextual hints) |
 | `pprof.peek` | Show callers and callees (use `sample_index=alloc_space` for heap) |
 | `pprof.list` | Line-level source annotation |
+| `pprof.trace_source` | Trace a hot function with source snippets and call chain context |
 | `pprof.discover` | Run end-to-end discovery analysis (downloads + analyzes) |
 | `pprof.storylines` | Find hot code paths in your repository (auto-detects heap profiles) |
 | `pprof.alloc_paths` | Analyze allocation paths with rates (MB/min) and caller chains |
 | `pprof.overhead_report` | Detect observability overhead (OTel, zap, gRPC, protobuf) |
+| `pprof.explain_overhead` | Explain why an overhead category/function is expensive |
 | `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | Detect RSS/heap mismatch patterns (SQLite, CGO, goroutines) |
 | `pprof.goroutine_analysis` | Detect goroutine leaks and blocking patterns |
@@ -161,6 +163,9 @@ Or run from source:
 | `pprof.hotspot_summary` | Top hotspots across profile types in one call |
 | `pprof.diff_top` | Compare two profiles |
 | `pprof.regression_check` | CI-friendly regression thresholds for function metrics |
+| `pprof.suggest_fix` | Suggest concrete fixes and optional diffs for known issues |
+| `pprof.generate_report` | Generate a markdown report from structured tool outputs |
+| `pprof.vendor_analyze` | Analyze vendored/external dependencies in hot paths |
 | `pprof.focus_paths` | Show all call paths to a function |
 | `pprof.traces_head` | Show stack traces |
 | `pprof.tags` | Filter by tags or list available tags |
