@@ -23,12 +23,14 @@ type TopResult struct {
 	Raw     string                `json:"raw"`
 	Rows    []pprofparse.TopRow   `json:"rows"`
 	Summary pprofparse.TopSummary `json:"summary"`
+	Hints   []string              `json:"hints,omitempty"` // Contextual hints based on profile type
 }
 
 type PeekParams struct {
-	Profile string
-	Binary  string
-	Regex   string
+	Profile     string
+	Binary      string
+	Regex       string
+	SampleIndex string
 }
 
 type PeekResult struct {
@@ -106,6 +108,9 @@ func RunTop(ctx context.Context, params TopParams) (TopResult, error) {
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return TopResult{}, noMatches
+		}
 		return TopResult{}, fmt.Errorf("pprof top failed: %w\n%s", err, stderr)
 	}
 
@@ -124,10 +129,16 @@ func RunPeek(ctx context.Context, params PeekParams) (PeekResult, error) {
 	}
 
 	pprofArgs := []string{"tool", "pprof", "-peek", params.Regex}
+	if params.SampleIndex != "" {
+		pprofArgs = append(pprofArgs, "-sample_index", params.SampleIndex)
+	}
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return PeekResult{}, noMatches
+		}
 		return PeekResult{}, fmt.Errorf("pprof peek failed: %w\n%s", err, stderr)
 	}
 
@@ -166,6 +177,9 @@ func RunList(ctx context.Context, params ListParams) (ListResult, error) {
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return ListResult{}, noMatches
+		}
 		return ListResult{}, fmt.Errorf("pprof list failed: %w\n%s", err, stderr)
 	}
 
@@ -310,6 +324,9 @@ func RunTags(ctx context.Context, params TagsParams) (TagsResult, error) {
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return TagsResult{}, noMatches
+		}
 		return TagsResult{}, fmt.Errorf("pprof tags failed: %w\n%s", err, stderr)
 	}
 
@@ -390,6 +407,9 @@ func RunFlamegraph(ctx context.Context, params FlamegraphParams) (FlamegraphResu
 
 	_, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return FlamegraphResult{}, noMatches
+		}
 		return FlamegraphResult{}, fmt.Errorf("pprof flamegraph failed: %w\n%s", err, stderr)
 	}
 
@@ -459,6 +479,9 @@ func RunCallgraph(ctx context.Context, params CallgraphParams) (CallgraphResult,
 
 	_, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return CallgraphResult{}, noMatches
+		}
 		return CallgraphResult{}, fmt.Errorf("pprof callgraph failed: %w\n%s", err, stderr)
 	}
 
@@ -511,6 +534,9 @@ func RunFocusPaths(ctx context.Context, params FocusPathsParams) (FocusPathsResu
 
 	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
+		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+			return FocusPathsResult{}, noMatches
+		}
 		return FocusPathsResult{}, fmt.Errorf("pprof focus_paths failed: %w\n%s", err, stderr)
 	}
 
@@ -528,10 +554,10 @@ type MergeParams struct {
 }
 
 type MergeResult struct {
-	Command     string `json:"command"`
-	OutputPath  string `json:"output_path"`
-	InputCount  int    `json:"input_count"`
-	Message     string `json:"message"`
+	Command    string `json:"command"`
+	OutputPath string `json:"output_path"`
+	InputCount int    `json:"input_count"`
+	Message    string `json:"message"`
 }
 
 func RunMerge(ctx context.Context, params MergeParams) (MergeResult, error) {
@@ -564,4 +590,3 @@ func RunMerge(ctx context.Context, params MergeParams) (MergeResult, error) {
 		Message:    fmt.Sprintf("Merged %d profiles into %s", len(params.Profiles), params.OutputPath),
 	}, nil
 }
-

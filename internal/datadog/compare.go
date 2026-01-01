@@ -46,11 +46,11 @@ type ProfileSummary struct {
 }
 
 type FunctionDiff struct {
-	Function   string  `json:"function"`
-	BeforeFlat string  `json:"before_flat"`
-	AfterFlat  string  `json:"after_flat"`
-	Change     string  `json:"change"`
-	Severity   string  `json:"severity"` // increase, decrease, new, removed
+	Function   string `json:"function"`
+	BeforeFlat string `json:"before_flat"`
+	AfterFlat  string `json:"after_flat"`
+	Change     string `json:"change"`
+	Severity   string `json:"severity"` // increase, decrease, new, removed
 }
 
 // CompareRange downloads profiles from two time ranges and compares them.
@@ -63,9 +63,10 @@ func CompareRange(ctx context.Context, params CompareRangeParams) (CompareRangeR
 	}
 
 	result := CompareRangeResult{
-		Service:  params.Service,
-		Env:      params.Env,
-		Warnings: []string{},
+		Service:    params.Service,
+		Env:        params.Env,
+		Warnings:   []string{},
+		TopChanges: []FunctionDiff{},
 	}
 
 	outDir := params.OutDir
@@ -197,7 +198,7 @@ func runPprofDiff(ctx context.Context, before, after string) (string, error) {
 }
 
 func parseDiffChanges(diffOutput string) []FunctionDiff {
-	var changes []FunctionDiff
+	changes := []FunctionDiff{}
 
 	lines := strings.Split(diffOutput, "\n")
 	for _, line := range lines {

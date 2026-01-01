@@ -8,8 +8,10 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
-	"github.com/conductorone/mcp-go-sdk/mcp/server"
+	"github.com/google/pprof/profile"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/arreyder/pprof-mcp/internal/datadog"
 	"github.com/arreyder/pprof-mcp/internal/pprof"
@@ -17,24 +19,111 @@ import (
 )
 
 func main() {
-	// Create tools provider with full schemas
-	toolsProvider := NewSchemaToolsProvider()
-	for _, def := range ToolSchemas() {
-		toolsProvider.AddTool(def)
+	s := mcp.NewServer(&mcp.Implementation{
+		Name:    "pprof-mcp",
+		Title:   "pprof MCP",
+		Version: "0.1.0",
+	}, &mcp.ServerOptions{
+		Instructions: "Profiling tools for Datadog profile download and deterministic pprof analysis.",
+	})
+
+	registry := NewToolRegistry()
+	if err := registry.AddAll(ToolSchemas()); err != nil {
+		log.Fatalf("Tool registry error: %v", err)
+	}
+	for _, def := range registry.List() {
+		def := def
+		mcp.AddTool(s, def.Tool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			return invokeTool(ctx, def.Tool, def.Handler, args)
+		})
 	}
 
-	s := server.NewMCPServer("pprof-mcp",
-		server.WithName("pprof MCP"),
-		server.WithVersion("0.1.0"),
-		server.WithInstructions("Profiling tools for Datadog profile download and deterministic pprof analysis."),
-		server.WithToolsProvider(toolsProvider),
-	)
-
 	log.Println("Starting pprof MCP server over stdio")
-	if err := s.ServeStdio(context.Background()); err != nil {
+	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatalf("Error serving MCP: %v", err)
 		os.Exit(1)
 	}
+}
+
+func invokeTool(ctx context.Context, tool *mcp.Tool, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
+	if err := ValidateArgs(tool, args); err != nil {
+		return ErrorResult(err, ""), nil, nil
+	}
+
+	cleanedArgs, err := sanitizeArgs(args)
+	if err != nil {
+		return ErrorResult(err, "Provide paths within PPROF_MCP_BASEDIR if it is set."), nil, nil
+	}
+
+	result, err := handler(ctx, cleanedArgs)
+	if err != nil {
+		if errors.Is(err, pprof.ErrNoMatches) {
+			return noMatchesResult(tool.Name, cleanedArgs, err), nil, nil
+		}
+		return ErrorResult(err, ""), nil, nil
+	}
+
+	switch v := result.(type) {
+	case ToolOutput:
+		res := TextResult(v.Text)
+		if v.Structured != nil {
+			return res, v.Structured, nil
+		}
+		return res, nil, nil
+	case *ToolOutput:
+		res := TextResult(v.Text)
+		if v.Structured != nil {
+			return res, v.Structured, nil
+		}
+		return res, nil, nil
+	case string:
+		return TextResult(v), nil, nil
+	case []mcp.Content:
+		return &mcp.CallToolResult{Content: v}, nil, nil
+	case mcp.Content:
+		return &mcp.CallToolResult{Content: []mcp.Content{v}}, nil, nil
+	default:
+		return formatUnexpectedResult(v), nil, nil
+	}
+}
+
+func noMatchesResult(toolName string, args map[string]any, err error) *mcp.CallToolResult {
+	hint := "Try a broader regex (e.g., (?i)GetLimits), or use pprof.top with focus to find the exact function name."
+	pattern := firstNonEmpty(
+		getString(args, "regex"),
+		getString(args, "function"),
+		getString(args, "focus"),
+		getString(args, "tag_focus"),
+		getString(args, "tag_show"),
+	)
+	msg := "No matching symbols found."
+	if err != nil && strings.TrimSpace(err.Error()) != "" {
+		msg = strings.TrimSpace(err.Error())
+	}
+
+	payload := map[string]any{
+		"matched": false,
+		"reason":  "no_matches",
+		"tool":    toolName,
+		"hint":    hint,
+	}
+	if pattern != "" {
+		payload["pattern"] = pattern
+	}
+
+	return &mcp.CallToolResult{
+		Content:           []mcp.Content{&mcp.TextContent{Text: msg + "\nHint: " + hint}},
+		StructuredContent: payload,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func downloadTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -43,6 +132,9 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 	outDir := getString(args, "out_dir")
 	hours := getInt(args, "hours", 72)
 	site := getString(args, "dd_site")
+	if site == "" {
+		site = getString(args, "site")
+	}
 	profileID := getString(args, "profile_id")
 	eventID := getString(args, "event_id")
 
@@ -67,18 +159,24 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 }
 
 func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+	sampleIndex := getString(args, "sample_index")
+
 	result, err := pprof.RunTop(ctx, pprof.TopParams{
-		Profile:     getString(args, "profile"),
+		Profile:     profilePath,
 		Binary:      getString(args, "binary"),
 		Cum:         getBool(args, "cum"),
 		NodeCount:   getInt(args, "nodecount", 0),
 		Focus:       getString(args, "focus"),
 		Ignore:      getString(args, "ignore"),
-		SampleIndex: getString(args, "sample_index"),
+		SampleIndex: sampleIndex,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	// Add contextual hints based on profile type
+	pprof.AddTopHints(&result, profilePath, sampleIndex)
 
 	payload := map[string]any{
 		"command": result.Command,
@@ -86,22 +184,39 @@ func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error)
 		"rows":    result.Rows,
 		"summary": result.Summary,
 	}
+	if len(result.Hints) > 0 {
+		payload["hints"] = result.Hints
+	}
 	return marshalJSON(payload)
 }
 
 func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	result, err := pprof.RunPeek(ctx, pprof.PeekParams{
-		Profile: getString(args, "profile"),
-		Binary:  getString(args, "binary"),
-		Regex:   getString(args, "regex"),
+		Profile:     getString(args, "profile"),
+		Binary:      getString(args, "binary"),
+		Regex:       getString(args, "regex"),
+		SampleIndex: getString(args, "sample_index"),
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
@@ -119,18 +234,39 @@ func pprofListTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
 
 func pprofTracesTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	lines := getInt(args, "lines", 0)
+	if lines == 0 {
+		lines = getInt(args, "max_lines", defaultTracesLines)
+	}
+	if lines > maxTracesLines {
+		lines = maxTracesLines
+	}
+
 	result, err := pprof.RunTracesHead(ctx, pprof.TracesParams{
 		Profile: getString(args, "profile"),
 		Binary:  getString(args, "binary"),
-		Lines:   getInt(args, "lines", 200),
+		Lines:   lines,
 	})
 	if err != nil {
 		return nil, err
@@ -193,6 +329,7 @@ func pprofStorylinesTool(ctx context.Context, args map[string]any) (interface{},
 		RepoPrefixes: prefixes,
 		RepoRoot:     getString(args, "repo_root"),
 		TrimPath:     getString(args, "trim_path"),
+		SampleIndex:  getString(args, "sample_index"),
 	})
 	if err != nil {
 		return nil, err
@@ -241,7 +378,8 @@ func datadogProfilesListTool(ctx context.Context, args map[string]any) (interfac
 		"command": fmt.Sprintf("profctl datadog profiles list --service %s --env %s", result.Service, result.Env),
 		"result":  result,
 	}
-	return marshalJSON(payload)
+	summary := fmt.Sprintf("Found %d profiles for %s/%s from %s to %s.", len(result.Candidates), result.Service, result.Env, result.FromTS, result.ToTS)
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func datadogProfilesPickTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -364,9 +502,25 @@ func pprofTagsTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		if len(result.Tags) > 0 {
+			payload["tags"] = result.Tags
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	if len(result.Tags) > 0 {
 		payload["tags"] = result.Tags
@@ -436,9 +590,22 @@ func pprofFocusPathsTool(ctx context.Context, args map[string]any) (interface{},
 		return nil, err
 	}
 
+	raw := result.Raw
+	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
+		trimmed, total, truncated := truncateLines(raw, maxLines)
+		raw = trimmed
+		payload := map[string]any{
+			"command":     result.Command,
+			"raw":         raw,
+			"total_lines": total,
+			"truncated":   truncated,
+		}
+		return marshalJSON(payload)
+	}
+
 	payload := map[string]any{
 		"command": result.Command,
-		"raw":     result.Raw,
+		"raw":     raw,
 	}
 	return marshalJSON(payload)
 }
@@ -483,7 +650,103 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 		"result": result,
 		"table":  datadog.FormatFunctionHistoryTable(result),
 	}
-	return marshalJSON(payload)
+	summary := fmt.Sprintf("Function %s found in %d/%d profiles.", result.Function, result.Summary.FoundInProfiles, result.Summary.TotalProfiles)
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofAllocPathsTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunAllocPaths(pprof.AllocPathsParams{
+		Profile:       getString(args, "profile"),
+		MinPercent:    getFloat(args, "min_percent", 1.0),
+		MaxPaths:      getInt(args, "max_paths", 20),
+		RepoPrefixes:  parseStringList(args, "repo_prefix"),
+		GroupBySource: getBool(args, "group_by_source"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof alloc_paths",
+		"result":  result,
+	}
+	if len(result.Warnings) > 0 {
+		payload["warnings"] = result.Warnings
+	}
+	summary := fmt.Sprintf("Analyzed %s total allocations, found %d allocation paths above threshold.",
+		result.TotalAllocStr, len(result.Paths))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofOverheadReportTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+
+	prof, err := loadProfile(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
+
+	// Find sample index
+	sampleIndex := 0
+	if si := getString(args, "sample_index"); si != "" {
+		for i, st := range prof.SampleType {
+			if st.Type == si {
+				sampleIndex = i
+				break
+			}
+		}
+	}
+
+	result := pprof.DetectOverhead(prof, sampleIndex)
+
+	payload := map[string]any{
+		"command": "pprof overhead_report",
+		"result":  result,
+	}
+
+	// Generate hints for high-overhead categories
+	hints := pprof.GenerateOverheadHints(result)
+	if len(hints) > 0 {
+		payload["hints"] = hints
+	}
+
+	summary := fmt.Sprintf("Total observability overhead: %.1f%% (%d categories detected)",
+		result.TotalOverhead, len(result.Detections))
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func pprofDetectRepoTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	profilePath := getString(args, "profile")
+
+	prof, err := loadProfile(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
+
+	result := pprof.DetectRepoFromProfile(prof)
+
+	payload := map[string]any{
+		"command": "pprof detect_repo",
+		"result":  result,
+	}
+
+	var summary string
+	if result.DetectedRoot != "" {
+		summary = fmt.Sprintf("Detected local repo at %s (confidence: %s)", result.DetectedRoot, result.Confidence)
+	} else {
+		summary = fmt.Sprintf("Found %d module paths but no local repo match", len(result.ModulePaths))
+	}
+	return marshalJSONWithSummary(summary, payload)
+}
+
+func loadProfile(path string) (*profile.Profile, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	return profile.Parse(file)
 }
 
 func getString(args map[string]any, key string) string {
@@ -600,13 +863,21 @@ func buildDownloadCommand(service, env, outDir string, hours int, site, profileI
 	return base
 }
 
-func marshalJSON(payload any) (interface{}, error) {
+func marshalJSON(payload any) (ToolOutput, error) {
+	return marshalJSONWithSummary("", payload)
+}
+
+func marshalJSONWithSummary(summary string, payload any) (ToolOutput, error) {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return nil, err
+		return ToolOutput{}, err
 	}
 	if len(data) == 0 {
-		return nil, errors.New("empty JSON response")
+		return ToolOutput{}, errors.New("empty JSON response")
 	}
-	return string(data), nil
+	text := string(data)
+	if summary != "" {
+		text = summary + "\n\n" + text
+	}
+	return ToolOutput{Text: text, Structured: payload}, nil
 }
