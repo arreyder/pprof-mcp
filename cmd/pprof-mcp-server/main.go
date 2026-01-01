@@ -9,7 +9,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/conductorone/mcp-go-sdk/mcp/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/arreyder/pprof-mcp/internal/datadog"
 	"github.com/arreyder/pprof-mcp/internal/pprof"
@@ -17,23 +17,47 @@ import (
 )
 
 func main() {
-	// Create tools provider with full schemas
-	toolsProvider := NewSchemaToolsProvider()
+	s := mcp.NewServer(&mcp.Implementation{
+		Name:    "pprof-mcp",
+		Title:   "pprof MCP",
+		Version: "0.1.0",
+	}, &mcp.ServerOptions{
+		Instructions: "Profiling tools for Datadog profile download and deterministic pprof analysis.",
+	})
+
 	for _, def := range ToolSchemas() {
-		toolsProvider.AddTool(def)
+		def := def
+		mcp.AddTool(s, def.Tool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			return invokeTool(ctx, def.Handler, args)
+		})
 	}
 
-	s := server.NewMCPServer("pprof-mcp",
-		server.WithName("pprof MCP"),
-		server.WithVersion("0.1.0"),
-		server.WithInstructions("Profiling tools for Datadog profile download and deterministic pprof analysis."),
-		server.WithToolsProvider(toolsProvider),
-	)
-
 	log.Println("Starting pprof MCP server over stdio")
-	if err := s.ServeStdio(context.Background()); err != nil {
+	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatalf("Error serving MCP: %v", err)
 		os.Exit(1)
+	}
+}
+
+func invokeTool(ctx context.Context, handler ToolHandler, args map[string]any) (*mcp.CallToolResult, any, error) {
+	result, err := handler(ctx, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch v := result.(type) {
+	case string:
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: v}},
+		}, nil, nil
+	case []mcp.Content:
+		return &mcp.CallToolResult{Content: v}, nil, nil
+	case mcp.Content:
+		return &mcp.CallToolResult{Content: []mcp.Content{v}}, nil, nil
+	default:
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%v", v)}},
+		}, nil, nil
 	}
 }
 
