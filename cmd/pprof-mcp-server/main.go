@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -55,6 +56,9 @@ func invokeTool(ctx context.Context, tool *mcp.Tool, handler ToolHandler, args m
 
 	result, err := handler(ctx, cleanedArgs)
 	if err != nil {
+		if errors.Is(err, pprof.ErrNoMatches) {
+			return noMatchesResult(tool.Name, cleanedArgs, err), nil, nil
+		}
 		return ErrorResult(err, ""), nil, nil
 	}
 
@@ -80,6 +84,45 @@ func invokeTool(ctx context.Context, tool *mcp.Tool, handler ToolHandler, args m
 	default:
 		return formatUnexpectedResult(v), nil, nil
 	}
+}
+
+func noMatchesResult(toolName string, args map[string]any, err error) *mcp.CallToolResult {
+	hint := "Try a broader regex (e.g., (?i)GetLimits), or use pprof.top with focus to find the exact function name."
+	pattern := firstNonEmpty(
+		getString(args, "regex"),
+		getString(args, "function"),
+		getString(args, "focus"),
+		getString(args, "tag_focus"),
+		getString(args, "tag_show"),
+	)
+	msg := "No matching symbols found."
+	if err != nil && strings.TrimSpace(err.Error()) != "" {
+		msg = strings.TrimSpace(err.Error())
+	}
+
+	payload := map[string]any{
+		"matched": false,
+		"reason":  "no_matches",
+		"tool":    toolName,
+		"hint":    hint,
+	}
+	if pattern != "" {
+		payload["pattern"] = pattern
+	}
+
+	return &mcp.CallToolResult{
+		Content:           []mcp.Content{&mcp.TextContent{Text: msg + "\nHint: " + hint}},
+		StructuredContent: payload,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func downloadTool(ctx context.Context, args map[string]any) (interface{}, error) {

@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/arreyder/pprof-mcp/internal/pprof"
 )
 
 func TestToolSchemasMarshalAndAdditionalProperties(t *testing.T) {
@@ -353,6 +356,27 @@ func TestErrorResultFormatting(t *testing.T) {
 	}
 	if res.StructuredContent == nil {
 		t.Fatalf("expected structured error content")
+	}
+}
+
+func TestNoMatchesResult(t *testing.T) {
+	err := fmt.Errorf("%w: no matches found for regexp: Foo", pprof.ErrNoMatches)
+	res := noMatchesResult("pprof.peek", map[string]any{"regex": "Foo"}, err)
+	if res.IsError {
+		t.Fatalf("expected IsError=false")
+	}
+	payload, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured payload")
+	}
+	if payload["matched"] != false {
+		t.Fatalf("expected matched=false")
+	}
+	if payload["pattern"] != "Foo" {
+		t.Fatalf("expected pattern Foo, got %v", payload["pattern"])
+	}
+	if payload["reason"] != "no_matches" {
+		t.Fatalf("expected reason no_matches, got %v", payload["reason"])
 	}
 }
 
