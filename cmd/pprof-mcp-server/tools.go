@@ -388,17 +388,23 @@ func ToolSchemas() []ToolDefinition {
 - SQLite temp_store=MEMORY patterns (RSS grows outside Go heap)
 - High goroutine counts (stack memory not in heap)
 - CGO allocations (memory outside Go control)
-- Memory fragmentation patterns
+- Compression buffer issues (zstd, zlib)
 - RSS/heap mismatch when container_rss_mb is provided
 
-**Provides**:
-- Suspicions with severity levels (low/medium/high)
-- Actionable recommendations (GODEBUG settings, pragma changes)
+**Confidence levels**: Each finding includes a confidence level:
+- confirmed: Direct evidence (e.g., libc.Alloc in CPU profile)
+- likely: Strong indirect evidence (e.g., SQLite + libc patterns + high churn)
+- suspected: Moderate evidence, needs confirmation
+- possible: Weak signal, worth investigating
 
-**Example use case**: Container OOM but heap profile shows only 124MB. This tool identifies likely causes like temp_store=MEMORY.`,
+**Best results**: Provide heap, CPU profiles AND repo_root for maximum insight. CPU profile confirms off-heap allocation, repo scanning finds the problematic code.
+
+**Example use case**: Container OOM but heap profile shows only 124MB. This tool identifies likely causes like temp_store=MEMORY and shows you where in the code to fix it.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"heap_profile":      prop("string", "Path or handle to heap profile file (required)"),
 					"goroutine_profile": prop("string", "Optional path or handle to goroutine profile for stack analysis"),
+					"cpu_profile":       prop("string", "Optional path or handle to CPU profile for cross-referencing (improves confidence)"),
+					"repo_root":         prop("string", "Optional repository root to scan for problematic code patterns (e.g., temp_store=MEMORY)"),
 					"binary":            BinaryPathOptional(),
 					"container_rss_mb":  integerProp("Container RSS in MB for mismatch detection", intPtr(0), nil),
 				}, "heap_profile"),

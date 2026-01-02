@@ -815,6 +815,8 @@ func pprofMemorySanityTool(ctx context.Context, args map[string]any) (interface{
 	result, err := pprof.RunMemorySanity(ctx, pprof.MemorySanityParams{
 		HeapProfile:      getString(args, "heap_profile"),
 		GoroutineProfile: getString(args, "goroutine_profile"),
+		CPUProfile:       getString(args, "cpu_profile"),
+		RepoRoot:         getString(args, "repo_root"),
 		Binary:           getString(args, "binary"),
 		ContainerRSSMB:   getInt(args, "container_rss_mb", 0),
 	})

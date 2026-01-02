@@ -258,7 +258,19 @@ func extractProfiles(zipBytes []byte, service, env, outDir string) ([]ProfileFil
 	defer os.RemoveAll(workDir)
 
 	for _, file := range reader.File {
-		path := filepath.Join(workDir, file.Name)
+		// Sanitize the file name to prevent path traversal attacks
+		cleanName := filepath.Clean(file.Name)
+		if cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+			return nil, "", fmt.Errorf("invalid path in zip: %s", file.Name)
+		}
+		path := filepath.Join(workDir, cleanName)
+
+		// Verify the path is within the work directory
+		rel, err := filepath.Rel(workDir, path)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, "", fmt.Errorf("path traversal detected in zip: %s", file.Name)
+		}
+
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(path, 0o755); err != nil {
 				return nil, "", err

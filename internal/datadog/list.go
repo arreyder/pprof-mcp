@@ -206,6 +206,25 @@ func parseCandidates(resp map[string]any) ([]ProfileCandidate, error) {
 	return candidates, nil
 }
 
+// usefulNumericFields defines the whitelist of fields worth extracting.
+// These are the only fields used by formatSampleInfo, sampleScore, and findAnomaly.
+var usefulNumericFields = map[string]bool{
+	// CPU samples
+	"cpu-samples": true, "cpu_samples": true,
+	// Allocation metrics
+	"alloc-samples": true, "alloc_samples": true, "alloc_space": true,
+	// In-use memory
+	"inuse_space": true, "inuse-space": true,
+	// Goroutines
+	"goroutines": true, "goroutine": true,
+	// Heap
+	"heap": true, "heap_inuse": true,
+	// Duration
+	"duration": true, "duration_ns": true, "profile_duration": true,
+	// Total/generic samples
+	"total-samples": true, "total_samples": true, "samples": true,
+}
+
 func extractNumericFields(entry map[string]any) map[string]float64 {
 	fields := map[string]float64{}
 	collectNumbers(fields, entry)
@@ -222,6 +241,10 @@ func extractNumericFields(entry map[string]any) map[string]float64 {
 
 func collectNumbers(out map[string]float64, input map[string]any) {
 	for key, val := range input {
+		// Only collect fields we actually use
+		if !usefulNumericFields[key] {
+			continue
+		}
 		switch typed := val.(type) {
 		case float64:
 			out[key] = typed
