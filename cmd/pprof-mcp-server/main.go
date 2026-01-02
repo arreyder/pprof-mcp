@@ -459,6 +459,118 @@ func d2BranchImpactTool(ctx context.Context, args map[string]any) (interface{}, 
 	return marshalJSON(payload)
 }
 
+func d2BranchImpactPlanTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	service := getString(args, "service")
+	outDir := getString(args, "out_dir")
+	beforeRef := getString(args, "before_ref")
+	afterRef := getString(args, "after_ref")
+	seconds := getInt(args, "seconds", 30)
+	rebuildTimeout := getInt(args, "rebuild_timeout", 300)
+	warmupDelay := getInt(args, "warmup_delay", 15)
+
+	plan, err := d2.CreateExecutionPlan(ctx, d2.BranchImpactParams{
+		Service:        service,
+		BeforeRef:      beforeRef,
+		AfterRef:       afterRef,
+		OutDir:         outDir,
+		Seconds:        seconds,
+		RebuildTimeout: time.Duration(rebuildTimeout) * time.Second,
+		WarmupDelay:    time.Duration(warmupDelay) * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine after_ref for display
+	afterRefDisplay := plan.Params.AfterRef
+	if afterRefDisplay == "" {
+		afterRefDisplay = plan.CurrentBranch
+	}
+
+	payload := map[string]any{
+		"id":               plan.ID,
+		"steps":            plan.Steps,
+		"estimated_time":   plan.EstimatedTime,
+		"current_branch":   plan.CurrentBranch,
+		"has_uncommitted":  plan.HasUncommitted,
+		"service":          plan.Params.Service,
+		"before_ref":       plan.Params.BeforeRef,
+		"after_ref":        afterRefDisplay,
+	}
+
+	return marshalJSON(payload)
+}
+
+func d2BranchImpactExecuteTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	planID := getString(args, "plan_id")
+
+	result, err := d2.ExecutePlan(ctx, planID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register profiles (same as d2BranchImpactTool)
+	registerProfiles := func(downloadResult d2.DownloadResult) (map[string]any, error) {
+		timestamp := time.Now().UTC().Format(time.RFC3339)
+		handles := []map[string]any{}
+		for _, file := range downloadResult.Files {
+			handle, err := profileRegistry.Register(profiles.Metadata{
+				Service:   downloadResult.Service,
+				Env:       "d2",
+				Type:      file.Type,
+				Timestamp: timestamp,
+				Path:      file.Path,
+				Bytes:     file.Bytes,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to register profile handle: %w", err)
+			}
+			handles = append(handles, map[string]any{
+				"type":   file.Type,
+				"handle": handle,
+				"bytes":  file.Bytes,
+			})
+		}
+
+		resultPayload := map[string]any{
+			"service":   downloadResult.Service,
+			"namespace": downloadResult.Namespace,
+			"pod_name":  downloadResult.PodName,
+			"pod_ip":    downloadResult.PodIP,
+			"files":     handles,
+		}
+		if len(downloadResult.Warnings) > 0 {
+			resultPayload["warnings"] = downloadResult.Warnings
+		}
+		return resultPayload, nil
+	}
+
+	beforePayload, err := registerProfiles(result.BeforeProfiles)
+	if err != nil {
+		return nil, err
+	}
+
+	afterPayload, err := registerProfiles(result.AfterProfiles)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"service":         result.Service,
+		"before_ref":      result.BeforeRef,
+		"after_ref":       result.AfterRef,
+		"before_profiles": beforePayload,
+		"after_profiles":  afterPayload,
+		"update_method":   result.UpdateMethod,
+		"git_stashed":     result.GitStashed,
+	}
+	if len(result.Warnings) > 0 {
+		payload["warnings"] = result.Warnings
+	}
+
+	return marshalJSON(payload)
+}
+
 func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	profilePath := getString(args, "profile")
 	sampleIndex := getString(args, "sample_index")
