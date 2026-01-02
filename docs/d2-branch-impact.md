@@ -2,6 +2,21 @@
 
 Compare profiles between git branches to measure the performance impact of code changes in your local d2 development environment.
 
+## Two-Phase Workflow (Recommended)
+
+For long-running operations, use the two-phase workflow to review the plan before execution:
+
+1. **Create Plan**: `d2.profile_branch_impact.plan` - Generate execution plan
+2. **Review**: Examine steps and estimated time
+3. **Execute**: `d2.profile_branch_impact.execute` - Run the plan (walk away!)
+
+### Why Two-Phase?
+
+- ✅ **Review before execution** - See exactly what will happen
+- ✅ **Walk away** - Approve once, come back to results (~7+ minutes)
+- ✅ **Time estimates** - Know how long it will take
+- ✅ **No surprises** - Clear about git stashing and branch switching
+
 ## Overview
 
 This tool automates the workflow of profiling a service before and after a code change:
@@ -16,9 +31,64 @@ This tool automates the workflow of profiling a service before and after a code 
 
 ## Quick Start
 
-### Basic Usage
+### Two-Phase Workflow (Recommended for Long Operations)
 
-Compare your current branch against main:
+**Step 1: Create the plan**
+
+```typescript
+// Natural language request:
+"Create a plan to compare profiles between main and my-branch for ratelimit,
+using 60 second samples with 20 second warmup"
+
+// This calls:
+mcp__pprof__d2_profile_branch_impact_plan({
+  service: "ratelimit",
+  out_dir: "/tmp/profile-comparison",
+  before_ref: "main",
+  after_ref: "my-branch",
+  seconds: 60,
+  warmup_delay: 20
+})
+
+// Returns:
+{
+  id: "a1b2c3d4e5f6g7h8",
+  steps: [
+    "Switch to main branch",
+    "Wait for Tilt rebuild (timeout: 5m0s)",
+    "Wait 20s for service warmup",
+    "Profile ratelimit service for 60 seconds",
+    "Switch to my-branch branch",
+    "Wait for Tilt rebuild (timeout: 5m0s)",
+    "Wait 20s for service warmup",
+    "Profile ratelimit service for 60 seconds",
+    "Compare profiles",
+    "Switch back to main branch"
+  ],
+  estimated_time: "~12 minutes",
+  current_branch: "main",
+  has_uncommitted: false
+}
+```
+
+**Step 2: Review and approve**
+
+You'll be prompted: "Execute this plan?" → Approve once
+
+**Step 3: Execute (walk away!)**
+
+```typescript
+// This runs automatically after approval:
+mcp__pprof__d2_profile_branch_impact_execute({
+  plan_id: "a1b2c3d4e5f6g7h8"
+})
+
+// Takes ~12 minutes, returns results when done
+```
+
+### One-Phase Usage (Quick)
+
+For quick comparisons without review:
 
 ```typescript
 mcp__pprof__d2_profile_branch_impact({

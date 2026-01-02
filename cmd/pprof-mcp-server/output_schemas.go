@@ -119,6 +119,19 @@ func d2BranchImpactOutputSchema() map[string]any {
 	}, "service", "before_ref", "after_ref", "before_profiles", "after_profiles", "update_method", "git_stashed")
 }
 
+func d2BranchImpactPlanOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"id":               prop("string", "Unique plan ID for execution"),
+		"steps":            arrayPropSchema(prop("string", "Step"), "Execution steps"),
+		"estimated_time":   prop("string", "Estimated duration"),
+		"current_branch":   prop("string", "Current git branch"),
+		"has_uncommitted":  prop("boolean", "Whether there are uncommitted changes"),
+		"service":          prop("string", "Service to profile"),
+		"before_ref":       prop("string", "Baseline git ref"),
+		"after_ref":        prop("string", "Comparison git ref"),
+	}, "id", "steps", "estimated_time", "current_branch", "has_uncommitted", "service", "before_ref", "after_ref")
+}
+
 func pprofTopOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command":  prop("string", "pprof command"),

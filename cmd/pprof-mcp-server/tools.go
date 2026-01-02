@@ -152,6 +152,49 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "d2.profile_branch_impact.plan",
+				Description: `Create an execution plan for branch impact profiling without executing it.
+
+**When to use**: Generate a plan to review before running a long-running profile comparison.
+
+**Workflow**:
+1. Call this tool with your parameters
+2. Review the execution plan (steps, estimated time)
+3. Call d2.profile_branch_impact.execute with the plan ID to run it
+
+**Returns**: Execution plan with unique ID, steps, and estimated duration.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":         prop("string", "The service name to profile (e.g., ratelimit, innkeeper) (required)"),
+					"out_dir":         prop("string", "Output directory for downloaded profiles (required)"),
+					"before_ref":      prop("string", "Git ref for baseline (default: main)"),
+					"after_ref":       prop("string", "Git ref for comparison (default: current branch)"),
+					"seconds":         integerProp("Duration in seconds for CPU profile (default: 30)", intPtr(1), intPtr(300)),
+					"rebuild_timeout": integerProp("Timeout in seconds for rebuild detection (default: 300)", intPtr(10), intPtr(1800)),
+					"warmup_delay":    integerProp("Warmup delay in seconds after rebuild (default: 15)", intPtr(0), intPtr(120)),
+				}, "service", "out_dir"),
+				OutputSchema: d2BranchImpactPlanOutputSchema(),
+			},
+			Handler: d2BranchImpactPlanTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "d2.profile_branch_impact.execute",
+				Description: `Execute a previously created branch impact profiling plan.
+
+**When to use**: After reviewing a plan created with d2.profile_branch_impact.plan.
+
+**Important**: This will take several minutes to complete. You can walk away after approval.
+
+**Returns**: Profile handles for before/after, update method, and any warnings.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"plan_id": prop("string", "Plan ID from d2.profile_branch_impact.plan (required)"),
+				}, "plan_id"),
+				OutputSchema: d2BranchImpactOutputSchema(),
+			},
+			Handler: d2BranchImpactExecuteTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "pprof.top",
 				Description: `Show top functions by CPU/memory usage from a pprof profile.
 

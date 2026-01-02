@@ -2,11 +2,31 @@ package d2
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
+)
+
+// ExecutionPlan represents a planned branch impact comparison
+type ExecutionPlan struct {
+	ID             string                `json:"id"`
+	Params         BranchImpactParams    `json:"params"`
+	Steps          []string              `json:"steps"`
+	EstimatedTime  string                `json:"estimated_time"`
+	CurrentBranch  string                `json:"current_branch"`
+	HasUncommitted bool                  `json:"has_uncommitted"`
+	CreatedAt      time.Time             `json:"created_at"`
+}
+
+// planStore stores execution plans in memory
+var (
+	planStore   = make(map[string]*ExecutionPlan)
+	planStoreMu sync.RWMutex
 )
 
 // BranchImpactParams contains parameters for comparing profiles between branches
@@ -368,4 +388,135 @@ func gitStashPop(ctx context.Context) error {
 func gitCheckout(ctx context.Context, ref string) error {
 	cmd := exec.CommandContext(ctx, "git", "checkout", ref)
 	return cmd.Run()
+}
+
+// Plan generation and execution functions
+
+// generatePlanID creates a unique plan ID
+func generatePlanID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// CreateExecutionPlan generates an execution plan without executing it
+func CreateExecutionPlan(ctx context.Context, params BranchImpactParams) (*ExecutionPlan, error) {
+	// Set defaults
+	if params.BeforeRef == "" {
+		params.BeforeRef = "main"
+	}
+	if params.Seconds <= 0 {
+		params.Seconds = 30
+	}
+	if params.RebuildTimeout == 0 {
+		params.RebuildTimeout = 5 * time.Minute
+	}
+	if params.WarmupDelay == 0 {
+		params.WarmupDelay = 15 * time.Second
+	}
+
+	// Get current state
+	currentBranch, err := getCurrentBranch(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	hasUncommitted, err := hasUncommittedChanges(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check git status: %w", err)
+	}
+
+	// Determine after ref
+	afterRef := params.AfterRef
+	if afterRef == "" {
+		afterRef = currentBranch
+	}
+
+	// Build step list
+	steps := []string{}
+
+	if hasUncommitted {
+		steps = append(steps, "Stash uncommitted changes")
+	}
+
+	steps = append(steps,
+		fmt.Sprintf("Switch to %s branch", params.BeforeRef),
+		fmt.Sprintf("Wait for Tilt rebuild (timeout: %v)", params.RebuildTimeout),
+		fmt.Sprintf("Wait %v for service warmup", params.WarmupDelay),
+		fmt.Sprintf("Profile %s service for %d seconds", params.Service, params.Seconds),
+		fmt.Sprintf("Switch to %s branch", afterRef),
+		fmt.Sprintf("Wait for Tilt rebuild (timeout: %v)", params.RebuildTimeout),
+		fmt.Sprintf("Wait %v for service warmup", params.WarmupDelay),
+		fmt.Sprintf("Profile %s service for %d seconds", params.Service, params.Seconds),
+		"Compare profiles",
+		fmt.Sprintf("Switch back to %s branch", currentBranch),
+	)
+
+	if hasUncommitted {
+		steps = append(steps, "Restore stashed changes")
+	}
+
+	// Estimate time (rough calculation)
+	estimatedSeconds := params.Seconds*2 + // two profiles
+		int(params.WarmupDelay.Seconds())*2 + // two warmups
+		int(params.RebuildTimeout.Seconds())*2 + // assume rebuilds take full timeout
+		30 // git operations
+
+	estimatedMinutes := estimatedSeconds / 60
+	estimatedTime := fmt.Sprintf("~%d minutes", estimatedMinutes)
+	if estimatedMinutes > 60 {
+		estimatedTime = fmt.Sprintf("~%d hours %d minutes", estimatedMinutes/60, estimatedMinutes%60)
+	}
+
+	plan := &ExecutionPlan{
+		ID:             generatePlanID(),
+		Params:         params,
+		Steps:          steps,
+		EstimatedTime:  estimatedTime,
+		CurrentBranch:  currentBranch,
+		HasUncommitted: hasUncommitted,
+		CreatedAt:      time.Now(),
+	}
+
+	// Store plan
+	planStoreMu.Lock()
+	planStore[plan.ID] = plan
+	planStoreMu.Unlock()
+
+	return plan, nil
+}
+
+// ExecutePlan executes a previously created plan
+func ExecutePlan(ctx context.Context, planID string) (BranchImpactResult, error) {
+	// Retrieve plan
+	planStoreMu.RLock()
+	plan, exists := planStore[planID]
+	planStoreMu.RUnlock()
+
+	if !exists {
+		return BranchImpactResult{}, fmt.Errorf("plan %s not found or expired", planID)
+	}
+
+	// Execute the comparison with the plan's parameters
+	result, err := CompareBranches(ctx, plan.Params)
+
+	// Clean up plan after execution (whether success or failure)
+	planStoreMu.Lock()
+	delete(planStore, planID)
+	planStoreMu.Unlock()
+
+	return result, err
+}
+
+// GetPlan retrieves a plan by ID
+func GetPlan(planID string) (*ExecutionPlan, error) {
+	planStoreMu.RLock()
+	defer planStoreMu.RUnlock()
+
+	plan, exists := planStore[planID]
+	if !exists {
+		return nil, fmt.Errorf("plan %s not found", planID)
+	}
+
+	return plan, nil
 }
