@@ -760,38 +760,106 @@ func pprofDiscoverTool(ctx context.Context, args map[string]any) (interface{}, e
 			return nil, fmt.Errorf("failed to create temp dir: %w", err)
 		}
 	}
-	hours := getInt(args, "hours", 72)
-	site := getString(args, "dd_site")
-	if site == "" {
-		site = getString(args, "site")
-	}
-	profileID := getString(args, "profile_id")
-	eventID := getString(args, "event_id")
 
-	downloadResult, err := datadog.DownloadLatestBundle(ctx, datadog.DownloadParams{
-		Service:   service,
-		Env:       env,
-		OutDir:    outDir,
-		Hours:     hours,
-		Site:      site,
-		ProfileID: profileID,
-		EventID:   eventID,
-	})
-	if err != nil {
-		return nil, err
+	// Check if we're in d2 environment
+	isD2 := d2.IsD2Environment()
+
+	var downloadErr error
+	var files []struct {
+		Type  string
+		Path  string
+		Bytes int64
+	}
+	var timestamp string
+	var warnings []string
+
+	if isD2 {
+		// Use d2 backend
+		seconds := getInt(args, "seconds", 30)
+		result, err := d2.DownloadProfiles(ctx, d2.DownloadParams{
+			Service: service,
+			OutDir:  outDir,
+			Seconds: seconds,
+		})
+		downloadErr = err
+		if err == nil {
+			for _, f := range result.Files {
+				files = append(files, struct {
+					Type  string
+					Path  string
+					Bytes int64
+				}{Type: f.Type, Path: f.Path, Bytes: f.Bytes})
+			}
+			timestamp = time.Now().UTC().Format(time.RFC3339)
+			warnings = result.Warnings
+			env = "d2" // Override env to d2
+		}
+	} else {
+		// Use Datadog backend
+		hours := getInt(args, "hours", 72)
+		site := getString(args, "dd_site")
+		if site == "" {
+			site = getString(args, "site")
+		}
+		profileID := getString(args, "profile_id")
+		eventID := getString(args, "event_id")
+
+		result, err := datadog.DownloadLatestBundle(ctx, datadog.DownloadParams{
+			Service:   service,
+			Env:       env,
+			OutDir:    outDir,
+			Hours:     hours,
+			Site:      site,
+			ProfileID: profileID,
+			EventID:   eventID,
+		})
+		downloadErr = err
+		if err == nil {
+			for _, f := range result.Files {
+				files = append(files, struct {
+					Type  string
+					Path  string
+					Bytes int64
+				}{Type: f.Type, Path: f.Path, Bytes: f.Bytes})
+			}
+			timestamp = result.Timestamp
+			warnings = result.Warnings
+		}
 	}
 
-	bundle, err := registerBundleHandles(downloadResult)
-	if err != nil {
-		return nil, err
+	if downloadErr != nil {
+		return nil, downloadErr
 	}
 
-	profileInputs := make([]pprof.DiscoveryProfileInput, 0, len(downloadResult.Files))
-	for _, file := range downloadResult.Files {
+	// Register handles for all profiles
+	handles := []map[string]any{}
+	for _, file := range files {
+		handle, err := profileRegistry.Register(profiles.Metadata{
+			Service:   service,
+			Env:       env,
+			Type:      file.Type,
+			Timestamp: timestamp,
+			Path:      file.Path,
+			Bytes:     file.Bytes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to register profile handle: %w", err)
+		}
+		handles = append(handles, map[string]any{
+			"type":   file.Type,
+			"handle": handle,
+			"path":   file.Path,
+			"bytes":  file.Bytes,
+		})
+	}
+
+	// Build profile inputs from registered handles
+	profileInputs := make([]pprof.DiscoveryProfileInput, 0, len(files))
+	for i, file := range files {
 		profileInputs = append(profileInputs, pprof.DiscoveryProfileInput{
 			Type:   file.Type,
 			Path:   file.Path,
-			Handle: bundle.HandleByType[file.Type],
+			Handle: handles[i]["handle"].(string),
 			Bytes:  file.Bytes,
 		})
 	}
@@ -799,7 +867,7 @@ func pprofDiscoverTool(ctx context.Context, args map[string]any) (interface{}, e
 	report, err := pprof.RunDiscovery(ctx, pprof.DiscoveryParams{
 		Service:        service,
 		Env:            env,
-		Timestamp:      downloadResult.Timestamp,
+		Timestamp:      timestamp,
 		Profiles:       profileInputs,
 		RepoPrefixes:   parseStringList(args, "repo_prefix"),
 		ContainerRSSMB: getInt(args, "container_rss_mb", 0),
@@ -807,8 +875,8 @@ func pprofDiscoverTool(ctx context.Context, args map[string]any) (interface{}, e
 	if err != nil {
 		return nil, err
 	}
-	if len(downloadResult.Warnings) > 0 {
-		report.Warnings = append(report.Warnings, downloadResult.Warnings...)
+	if len(warnings) > 0 {
+		report.Warnings = append(report.Warnings, warnings...)
 	}
 
 	payload := map[string]any{

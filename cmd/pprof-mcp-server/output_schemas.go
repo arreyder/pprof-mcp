@@ -389,7 +389,7 @@ func pprofHotspotSummaryOutputSchema() map[string]any {
 			}, "function", "delay_pct"), "Top mutex hotspots"),
 			"goroutine_count": prop("integer", "Total goroutines"),
 			"warnings":        arrayPropSchema(prop("string", "Warning"), "Warnings"),
-		}, "cpu_top5", "heap_top5", "mutex_top5"),
+		}, "cpu_top5", "heap_top5"),
 	}, "command", "result")
 }
 
