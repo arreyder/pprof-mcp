@@ -151,9 +151,14 @@ Or run from source:
 
 ### Local D2 Development
 
+> **Note:** These tools are currently specific to the internal c1/d2 development environment (Tilt-based, specific pod naming conventions, debug server on port 4421). They could be generalized for broader pprof use in the future.
+
 | Tool | Description |
 |------|-------------|
 | `d2.profiles.download` | Download profiles from local d2 services (uses kubectl + port-forward) |
+| `d2.profile_branch_impact` | Compare profiles between git branches (one-phase, immediate execution) |
+| `d2.profile_branch_impact.plan` | Create execution plan for branch comparison (two-phase, review first) |
+| `d2.profile_branch_impact.execute` | Execute a previously created branch impact plan |
 
 ### Profile Analysis
 
