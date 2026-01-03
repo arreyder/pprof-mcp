@@ -105,6 +105,10 @@ func sanitizeArgs(args map[string]any) (map[string]any, error) {
 }
 
 func sanitizePath(baseDir, value string) (string, error) {
+	return sanitizePathStrict(baseDir, value)
+}
+
+func sanitizePathStrict(baseDir, value string) (string, error) {
 	if value == "" {
 		return value, nil
 	}
@@ -127,9 +131,62 @@ func sanitizePath(baseDir, value string) (string, error) {
 		return "", fmt.Errorf("invalid path %q: %w", value, err)
 	}
 
-	rel, err := filepath.Rel(baseAbs, absPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q is outside base dir %q", value, baseAbs)
+	baseReal := baseAbs
+	if resolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
+		baseReal = resolved
 	}
-	return absPath, nil
+
+	candidateReal, err := resolvePathReal(absPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path %q: %w", value, err)
+	}
+
+	// Compare against the real base path to prevent symlink escapes.
+	rel, err := filepath.Rel(baseReal, candidateReal)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is outside base dir %q", value, baseReal)
+	}
+	return candidateReal, nil
+}
+
+func resolvePathReal(path string) (string, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		realPath, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", err
+		}
+		return realPath, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	// For new paths, resolve the closest existing parent, then join the rest.
+	missing := []string{}
+	current := path
+	for {
+		parentInfo, statErr := os.Lstat(current)
+		if statErr == nil {
+			if !parentInfo.IsDir() {
+				return "", fmt.Errorf("parent %q is not a directory", current)
+			}
+			realParent, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				realParent = filepath.Join(realParent, missing[i])
+			}
+			return realParent, nil
+		}
+		if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		if current == string(filepath.Separator) {
+			return "", fmt.Errorf("path %q has no existing parent", path)
+		}
+		missing = append(missing, filepath.Base(current))
+		current = filepath.Dir(current)
+	}
 }

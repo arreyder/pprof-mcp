@@ -206,7 +206,9 @@ func ToolSchemas() []ToolDefinition {
 - sample_index: Use 'alloc_space' for heap profiles, 'delay' for mutex/block profiles
 - focus: Filter to functions matching regex (e.g., "mypackage")
 
-**Returns**: Structured data with function names, flat/cumulative values, and percentages.`,
+**Returns**: Structured data with function names, flat/cumulative values, and percentages.
+
+**Optional**: Use max_lines or max_bytes to cap raw output text.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"profile":          ProfilePath(),
 					"binary":           BinaryPathOptional(),
@@ -220,6 +222,8 @@ func ToolSchemas() []ToolDefinition {
 					"baseline_path":    prop("string", "Optional path to baseline store file (default: .pprof-mcp-baselines.json)"),
 					"service":          prop("string", "Service name (optional; used for baseline key)"),
 					"env":              prop("string", "Environment (optional; used for baseline key)"),
+					"max_lines":        integerProp("Maximum number of raw output lines to return", intPtr(0), nil),
+					"max_bytes":        integerProp("Maximum number of raw output bytes to return", intPtr(0), nil),
 				}, "profile"),
 				OutputSchema: pprofTopOutputSchema(),
 			},
@@ -238,13 +242,14 @@ func ToolSchemas() []ToolDefinition {
 
 **Important for heap profiles**: Use sample_index="alloc_space" for allocation analysis, otherwise peek defaults to inuse_space which may not show all functions.
 
-**Optional**: Use max_lines to cap the output size.`,
+**Optional**: Use max_lines or max_bytes to cap the output size.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"profile":      ProfilePath(),
 					"binary":       BinaryPathOptional(),
 					"regex":        prop("string", "Regex pattern to match function names (required)"),
 					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space). Required for heap profiles to find allocation hot spots."),
 					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of output bytes to return", intPtr(0), nil),
 				}, "profile", "regex"),
 			},
 			Handler: pprofPeekTool,
@@ -260,7 +265,7 @@ func ToolSchemas() []ToolDefinition {
 
 **Example output**: Shows each line with CPU time, helping pinpoint the exact bottleneck.
 
-**Optional**: Use max_lines to cap the output size.`,
+**Optional**: Use max_lines or max_bytes to cap the output size.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"profile":      ProfilePath(),
 					"binary":       BinaryPathOptional(),
@@ -269,6 +274,7 @@ func ToolSchemas() []ToolDefinition {
 					"trim_path":    prop("string", "Path prefix to trim from source file paths (default: /xsrc)"),
 					"source_paths": arrayOrStringPropSchema(prop("string", "Source path"), "Additional source paths for vendored or external dependencies (string or list)"),
 					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of output bytes to return", intPtr(0), nil),
 				}, "profile", "function"),
 			},
 			Handler: pprofListTool,
@@ -286,6 +292,7 @@ func ToolSchemas() []ToolDefinition {
 					"binary":    BinaryPathOptional(),
 					"lines":     integerProp("Maximum number of lines to return (default: 200)", intPtr(0), intPtr(maxTracesLines)),
 					"max_lines": integerProp("Alias for lines", intPtr(0), intPtr(maxTracesLines)),
+					"max_bytes": integerProp("Maximum number of output bytes to return", intPtr(0), nil),
 				}, "profile"),
 			},
 			Handler: pprofTracesTool,
@@ -305,7 +312,9 @@ func ToolSchemas() []ToolDefinition {
 2. Download comparison profile (e.g., after fix)
 3. Use this tool with 'before' and 'after' paths
 
-**Returns**: Delta showing which functions improved/regressed and by how much.`,
+**Returns**: Delta showing which functions improved/regressed and by how much.
+
+**Optional**: Use max_lines or max_bytes to include a truncated text summary.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"before":       prop("string", "Path or handle for the baseline pprof profile (required)"),
 					"after":        prop("string", "Path or handle for the comparison pprof profile (required)"),
@@ -315,6 +324,8 @@ func ToolSchemas() []ToolDefinition {
 					"focus":        prop("string", "Regex to focus on specific functions"),
 					"ignore":       prop("string", "Regex to ignore specific functions"),
 					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space, inuse_space)"),
+					"max_lines":    integerProp("Maximum number of summary lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of summary bytes to return", intPtr(0), nil),
 				}, "before", "after"),
 			},
 			Handler: pprofDiffTool,
@@ -687,10 +698,12 @@ func ToolSchemas() []ToolDefinition {
 1. Discover metrics for your service
 2. Use metric names with Datadog dashboards/queries to correlate with profile timestamps`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"service": prop("string", "The service name to search for related metrics (required)"),
-					"env":     prop("string", "The environment (optional, for context)"),
-					"site":    prop("string", "Datadog site (default: from DD_SITE env or us3.datadoghq.com)"),
-					"query":   prop("string", "Additional metric name pattern to search for"),
+					"service":   prop("string", "The service name to search for related metrics (required)"),
+					"env":       prop("string", "The environment (optional, for context)"),
+					"site":      prop("string", "Datadog site (default: from DD_SITE env or us3.datadoghq.com)"),
+					"query":     prop("string", "Additional metric name pattern to search for"),
+					"max_lines": integerProp("Maximum number of table lines to return", intPtr(0), nil),
+					"max_bytes": integerProp("Maximum number of table bytes to return", intPtr(0), nil),
 				}, "service"),
 			},
 			Handler: datadogMetricsDiscoverTool,
@@ -724,6 +737,8 @@ func ToolSchemas() []ToolDefinition {
 					"after_to":     prop("string", "End of 'after' range (RFC3339 or relative, default: now)"),
 					"out_dir":      prop("string", "Directory to store downloaded profiles (default: temp dir)"),
 					"profile_type": enumProp("string", "Profile type to compare: cpu, heap, goroutines, mutex, block (default: cpu)", []string{"cpu", "heap", "goroutines", "mutex", "block"}),
+					"max_lines":    integerProp("Maximum number of formatted lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of formatted bytes to return", intPtr(0), nil),
 				}, "service", "env", "before_from", "after_from"),
 				OutputSchema: compareRangeOutputSchema(),
 			},
@@ -755,6 +770,8 @@ func ToolSchemas() []ToolDefinition {
 					"event_time": prop("string", "Timestamp of the event (RFC3339 format, required)"),
 					"window":     prop("string", "Time window to search around event (e.g., '30m', '1h', '2h') (default: 1h)"),
 					"limit":      integerProp("Max profiles to return per side (default: 10)", intPtr(0), nil),
+					"max_lines":  integerProp("Maximum number of formatted lines to return", intPtr(0), nil),
+					"max_bytes":  integerProp("Maximum number of formatted bytes to return", intPtr(0), nil),
 				}, "service", "env", "event_time"),
 			},
 			Handler: datadogProfilesNearEventTool,
@@ -770,7 +787,7 @@ func ToolSchemas() []ToolDefinition {
 
 **Example**: Filter CPU profile to a specific tenant: tag_focus="tenant_id:abc123"
 
-**Optional**: Use max_lines to cap the output size.`,
+**Optional**: Use max_lines or max_bytes to cap the output size.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"profile":      ProfilePath(),
 					"binary":       BinaryPathOptional(),
@@ -781,6 +798,7 @@ func ToolSchemas() []ToolDefinition {
 					"nodecount":    integerProp("Maximum number of nodes to show", intPtr(0), nil),
 					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
 					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of output bytes to return", intPtr(0), nil),
 				}, "profile"),
 			},
 			Handler: pprofTagsTool,
@@ -841,7 +859,7 @@ func ToolSchemas() []ToolDefinition {
 
 **Difference from peek**: peek shows immediate callers/callees; focus_paths shows complete call stacks.
 
-**Optional**: Use max_lines to cap the output size.`,
+**Optional**: Use max_lines or max_bytes to cap the output size.`,
 				InputSchema: NewObjectSchema(map[string]any{
 					"profile":      ProfilePath(),
 					"function":     prop("string", "Target function name or regex to find paths to (required)"),
@@ -850,6 +868,7 @@ func ToolSchemas() []ToolDefinition {
 					"nodecount":    integerProp("Maximum number of paths to show", intPtr(0), nil),
 					"sample_index": prop("string", "Sample index to use (e.g., cpu, alloc_space)"),
 					"max_lines":    integerProp("Maximum number of output lines to return", intPtr(0), nil),
+					"max_bytes":    integerProp("Maximum number of output bytes to return", intPtr(0), nil),
 				}, "profile", "function"),
 			},
 			Handler: pprofFocusPathsTool,
@@ -892,14 +911,16 @@ func ToolSchemas() []ToolDefinition {
 **Example**: Track "myFunction" over the last 24 hours:
   function="myFunction", hours=24, limit=10`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"service":  prop("string", "The service name (required)"),
-					"env":      prop("string", "The environment (required)"),
-					"function": prop("string", "Function name or pattern to search for (required)"),
-					"from":     prop("string", "Start time (RFC3339 or relative like '-24h')"),
-					"to":       prop("string", "End time (RFC3339 or relative)"),
-					"hours":    integerProp("Number of hours to look back (default: 72)", intPtr(0), nil),
-					"limit":    integerProp("Maximum number of profiles to check (default: 10)", intPtr(0), nil),
-					"site":     prop("string", "Datadog site"),
+					"service":   prop("string", "The service name (required)"),
+					"env":       prop("string", "The environment (required)"),
+					"function":  prop("string", "Function name or pattern to search for (required)"),
+					"from":      prop("string", "Start time (RFC3339 or relative like '-24h')"),
+					"to":        prop("string", "End time (RFC3339 or relative)"),
+					"hours":     integerProp("Number of hours to look back (default: 72)", intPtr(0), nil),
+					"limit":     integerProp("Maximum number of profiles to check (default: 10)", intPtr(0), nil),
+					"site":      prop("string", "Datadog site"),
+					"max_lines": integerProp("Maximum number of table lines to return", intPtr(0), nil),
+					"max_bytes": integerProp("Maximum number of table bytes to return", intPtr(0), nil),
 				}, "service", "env", "function"),
 				OutputSchema: functionHistoryOutputSchema(),
 			},
@@ -976,6 +997,8 @@ func ToolSchemas() []ToolDefinition {
 							"additionalProperties": true,
 						},
 					}, "kind", "data"), "Analysis inputs (required)"),
+					"max_lines": integerProp("Maximum number of markdown lines to return", intPtr(0), nil),
+					"max_bytes": integerProp("Maximum number of markdown bytes to return", intPtr(0), nil),
 				}, "inputs"),
 				OutputSchema: pprofGenerateReportOutputSchema(),
 			},

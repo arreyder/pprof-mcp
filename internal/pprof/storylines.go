@@ -9,6 +9,7 @@ import (
 	"github.com/google/pprof/profile"
 
 	"github.com/arreyder/pprof-mcp/internal/pprofparse"
+	"github.com/arreyder/pprof-mcp/internal/textutil"
 )
 
 type StorylinesParams struct {
@@ -39,16 +40,17 @@ type Storyline struct {
 }
 
 type StorylineEvidence struct {
-	TopRow   map[string]any  `json:"top_row"`
-	PeekLeaf EvidenceOutput  `json:"peek_leaf"`
-	PeekApp  EvidenceOutput  `json:"peek_first_app"`
-	ListApp  EvidenceOutput  `json:"list_first_app"`
+	TopRow   map[string]any `json:"top_row"`
+	PeekLeaf EvidenceOutput `json:"peek_leaf"`
+	PeekApp  EvidenceOutput `json:"peek_first_app"`
+	ListApp  EvidenceOutput `json:"list_first_app"`
 }
 
 type EvidenceOutput struct {
-	Command   string `json:"command"`
-	Raw       string `json:"raw"`
-	Truncated bool   `json:"truncated"`
+	Command   string                `json:"command"`
+	Raw       string                `json:"raw"`
+	Truncated bool                  `json:"truncated"`
+	RawMeta   textutil.TruncateMeta `json:"raw_meta,omitempty"`
 }
 
 func RunStorylines(ctx context.Context, params StorylinesParams) (StorylinesResult, error) {
@@ -287,8 +289,8 @@ func runEvidencePeek(ctx context.Context, profilePath, symbol, sampleIndex strin
 	if err != nil {
 		return EvidenceOutput{}
 	}
-	raw, truncated := truncate(result.Raw, 4000)
-	return EvidenceOutput{Command: result.Command, Raw: raw, Truncated: truncated}
+	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta)
+	return EvidenceOutput{Command: result.Command, Raw: trimmed, RawMeta: meta, Truncated: meta.Truncated}
 }
 
 func runEvidenceList(ctx context.Context, profilePath, symbol string, params StorylinesParams) EvidenceOutput {
@@ -301,15 +303,52 @@ func runEvidenceList(ctx context.Context, profilePath, symbol string, params Sto
 	if err != nil {
 		return EvidenceOutput{}
 	}
-	raw, truncated := truncate(result.Raw, 4000)
-	return EvidenceOutput{Command: result.Command, Raw: raw, Truncated: truncated}
+	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta)
+	return EvidenceOutput{Command: result.Command, Raw: trimmed, RawMeta: meta, Truncated: meta.Truncated}
 }
 
-func truncate(value string, limit int) (string, bool) {
-	if len(value) <= limit {
-		return value, false
+func applyEvidenceTruncation(raw string, base textutil.TruncateMeta) (string, textutil.TruncateMeta) {
+	result := textutil.TruncateText(raw, textutil.TruncateOptions{
+		MaxBytes: 4000,
+		Strategy: textutil.StrategyHead,
+	})
+	meta := mergeTruncateMeta(base, result.Meta)
+	return result.Text, meta
+}
+
+func mergeTruncateMeta(base, extra textutil.TruncateMeta) textutil.TruncateMeta {
+	merged := base
+	if merged.TotalBytes == 0 {
+		merged.TotalBytes = extra.TotalBytes
 	}
-	return value[:limit], true
+	if merged.TotalLines == 0 {
+		merged.TotalLines = extra.TotalLines
+	}
+	merged.Truncated = base.Truncated || extra.Truncated
+	merged.TruncatedReason = mergeReasons(base.TruncatedReason, extra.TruncatedReason)
+	if !merged.Truncated {
+		merged.TruncatedReason = ""
+	}
+	return merged
+}
+
+func mergeReasons(reasons ...string) string {
+	seen := map[string]struct{}{}
+	ordered := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		for _, item := range strings.Split(reason, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			ordered = append(ordered, item)
+		}
+	}
+	return strings.Join(ordered, ",")
 }
 
 func reverse(items []string) {
@@ -317,4 +356,3 @@ func reverse(items []string) {
 		items[i], items[j] = items[j], items[i]
 	}
 }
-

@@ -91,6 +91,10 @@ Add to your Claude config:
 
 Optional safety: set `PPROF_MCP_BASEDIR` to restrict file reads/writes to a base directory (paths are cleaned and must stay within this directory). For Codex clients that require tool names without dots, set `PPROF_MCP_TOOL_NAME_MODE=codex` (or pass `--tool-name-mode=codex`) to expose tool names with underscores instead of dots.
 
+Output limits: tools that return large text accept optional `max_lines`/`max_bytes` and return truncation metadata (`*_meta` with total_lines/total_bytes/truncated/truncated_reason). Command stdout/stderr capture is capped via `PPROF_MCP_MAX_STDOUT_BYTES` (default 1000000) and `PPROF_MCP_MAX_STDERR_BYTES` (default 200000).
+
+Datadog resilience: configure retries and rate limiting with `PPROF_MCP_DD_MAX_RETRIES` (default 5 attempts) and `PPROF_MCP_DD_RATE_LIMIT_RPS` (default 5 requests/sec per host; set 0 to disable).
+
 ### Codex Compatibility
 
 Codex requires tool names that match `^[a-zA-Z0-9_-]+$`. To support Codex, run the server with `PPROF_MCP_TOOL_NAME_MODE=codex` or `--tool-name-mode=codex`. This replaces dots with underscores (e.g., `pprof.top` becomes `pprof_top`) while keeping the same behavior and schemas.

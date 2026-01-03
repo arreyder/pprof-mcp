@@ -514,14 +514,14 @@ func d2BranchImpactPlanTool(ctx context.Context, args map[string]any) (interface
 	}
 
 	payload := map[string]any{
-		"id":               plan.ID,
-		"steps":            plan.Steps,
-		"estimated_time":   plan.EstimatedTime,
-		"current_branch":   plan.CurrentBranch,
-		"has_uncommitted":  plan.HasUncommitted,
-		"service":          plan.Params.Service,
-		"before_ref":       plan.Params.BeforeRef,
-		"after_ref":        afterRefDisplay,
+		"id":              plan.ID,
+		"steps":           plan.Steps,
+		"estimated_time":  plan.EstimatedTime,
+		"current_branch":  plan.CurrentBranch,
+		"has_uncommitted": plan.HasUncommitted,
+		"service":         plan.Params.Service,
+		"before_ref":      plan.Params.BeforeRef,
+		"after_ref":       afterRefDisplay,
 	}
 
 	return marshalJSON(payload)
@@ -617,12 +617,18 @@ func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error)
 	// Add contextual hints based on profile type
 	pprof.AddTopHints(&result, profilePath, sampleIndex)
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+
 	payload := map[string]any{
-		"command": result.Command,
-		"raw":     result.Raw,
-		"rows":    result.Rows,
-		"summary": result.Summary,
+		"command":  result.Command,
+		"raw":      raw,
+		"raw_meta": rawMeta,
+		"rows":     result.Rows,
+		"summary":  result.Summary,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	if len(result.Hints) > 0 {
 		payload["hints"] = result.Hints
 	}
@@ -670,23 +676,18 @@ func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
-	raw := result.Raw
-	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
-		trimmed, total, truncated := truncateLines(raw, maxLines)
-		raw = trimmed
-		payload := map[string]any{
-			"command":     result.Command,
-			"raw":         raw,
-			"total_lines": total,
-			"truncated":   truncated,
-		}
-		return marshalJSON(payload)
-	}
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
 
 	payload := map[string]any{
-		"command": result.Command,
-		"raw":     raw,
+		"command":     result.Command,
+		"raw":         raw,
+		"raw_meta":    rawMeta,
+		"total_lines": rawMeta.TotalLines,
+		"truncated":   rawMeta.Truncated,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	return marshalJSON(payload)
 }
 
@@ -703,23 +704,18 @@ func pprofListTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
-	raw := result.Raw
-	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
-		trimmed, total, truncated := truncateLines(raw, maxLines)
-		raw = trimmed
-		payload := map[string]any{
-			"command":     result.Command,
-			"raw":         raw,
-			"total_lines": total,
-			"truncated":   truncated,
-		}
-		return marshalJSON(payload)
-	}
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
 
 	payload := map[string]any{
-		"command": result.Command,
-		"raw":     raw,
+		"command":     result.Command,
+		"raw":         raw,
+		"raw_meta":    rawMeta,
+		"total_lines": rawMeta.TotalLines,
+		"truncated":   rawMeta.Truncated,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	return marshalJSON(payload)
 }
 
@@ -741,12 +737,26 @@ func pprofTracesTool(ctx context.Context, args map[string]any) (interface{}, err
 		return nil, err
 	}
 
+	maxBytes := getInt(args, "max_bytes", 0)
+	baseMeta := result.RawMeta
+	if result.Truncated {
+		baseMeta.Truncated = true
+		baseMeta.TruncatedReason = mergeReasons(baseMeta.TruncatedReason, "max_lines")
+	}
+	raw, rawMeta := applyTextLimits(result.Raw, &baseMeta, 0, maxBytes)
+	totalLines := rawMeta.TotalLines
+	if totalLines == 0 {
+		totalLines = result.TotalLines
+	}
+
 	payload := map[string]any{
 		"command":     result.Command,
-		"raw":         result.Raw,
-		"total_lines": result.TotalLines,
-		"truncated":   result.Truncated,
+		"raw":         raw,
+		"raw_meta":    rawMeta,
+		"total_lines": totalLines,
+		"truncated":   rawMeta.Truncated,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	return marshalJSON(payload)
 }
 
@@ -771,7 +781,68 @@ func pprofDiffTool(ctx context.Context, args map[string]any) (interface{}, error
 		"after":    result.After,
 		"deltas":   result.Deltas,
 	}
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	if maxLines > 0 || maxBytes > 0 {
+		formatted := formatDiffTop(result.Deltas)
+		raw, rawMeta := applyTextLimits(formatted, nil, maxLines, maxBytes)
+		payload["raw"] = raw
+		payload["raw_meta"] = rawMeta
+		payload["total_lines"] = rawMeta.TotalLines
+		payload["truncated"] = rawMeta.Truncated
+	}
 	return marshalJSON(payload)
+}
+
+func formatDiffTop(deltas []map[string]any) string {
+	var b strings.Builder
+	b.WriteString("name\tbefore_flat\tafter_flat\tbefore_cum\tafter_cum\tdelta_seconds\n")
+	for _, delta := range deltas {
+		name := formatDeltaField(delta["name"])
+		beforeFlat := formatDeltaField(delta["before_flat"])
+		afterFlat := formatDeltaField(delta["after_flat"])
+		beforeCum := formatDeltaField(delta["before_cum"])
+		afterCum := formatDeltaField(delta["after_cum"])
+		deltaSeconds := formatDeltaSeconds(delta["delta_seconds"])
+		b.WriteString(name)
+		b.WriteString("\t")
+		b.WriteString(beforeFlat)
+		b.WriteString("\t")
+		b.WriteString(afterFlat)
+		b.WriteString("\t")
+		b.WriteString(beforeCum)
+		b.WriteString("\t")
+		b.WriteString(afterCum)
+		b.WriteString("\t")
+		b.WriteString(deltaSeconds)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatDeltaField(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+func formatDeltaSeconds(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case float64:
+		return fmt.Sprintf("%.6f", typed)
+	case float32:
+		return fmt.Sprintf("%.6f", typed)
+	case int:
+		return fmt.Sprintf("%d", typed)
+	case int64:
+		return fmt.Sprintf("%d", typed)
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 func pprofRegressionCheckTool(ctx context.Context, args map[string]any) (interface{}, error) {
@@ -1320,10 +1391,15 @@ func datadogMetricsDiscoverTool(ctx context.Context, args map[string]any) (inter
 		return nil, err
 	}
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	table, tableMeta := applyTextLimits(datadog.FormatMetricsTable(result.Metrics), nil, maxLines, maxBytes)
+
 	payload := map[string]any{
-		"command": fmt.Sprintf("profctl datadog metrics discover --service %s", getString(args, "service")),
-		"result":  result,
-		"table":   datadog.FormatMetricsTable(result.Metrics),
+		"command":    fmt.Sprintf("profctl datadog metrics discover --service %s", getString(args, "service")),
+		"result":     result,
+		"table":      table,
+		"table_meta": tableMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1344,10 +1420,15 @@ func datadogProfilesCompareRangeTool(ctx context.Context, args map[string]any) (
 		return nil, err
 	}
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	formatted, formattedMeta := applyTextLimits(datadog.FormatCompareResult(result), nil, maxLines, maxBytes)
+
 	payload := map[string]any{
-		"command":   "profctl datadog profiles compare_range",
-		"result":    result,
-		"formatted": datadog.FormatCompareResult(result),
+		"command":        "profctl datadog profiles compare_range",
+		"result":         result,
+		"formatted":      formatted,
+		"formatted_meta": formattedMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1365,10 +1446,15 @@ func datadogProfilesNearEventTool(ctx context.Context, args map[string]any) (int
 		return nil, err
 	}
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	formatted, formattedMeta := applyTextLimits(datadog.FormatNearEventResult(result), nil, maxLines, maxBytes)
+
 	payload := map[string]any{
-		"command":   "profctl datadog profiles near_event",
-		"result":    result,
-		"formatted": datadog.FormatNearEventResult(result),
+		"command":        "profctl datadog profiles near_event",
+		"result":         result,
+		"formatted":      formatted,
+		"formatted_meta": formattedMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1388,26 +1474,18 @@ func pprofTagsTool(ctx context.Context, args map[string]any) (interface{}, error
 		return nil, err
 	}
 
-	raw := result.Raw
-	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
-		trimmed, total, truncated := truncateLines(raw, maxLines)
-		raw = trimmed
-		payload := map[string]any{
-			"command":     result.Command,
-			"raw":         raw,
-			"total_lines": total,
-			"truncated":   truncated,
-		}
-		if len(result.Tags) > 0 {
-			payload["tags"] = result.Tags
-		}
-		return marshalJSON(payload)
-	}
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
 
 	payload := map[string]any{
-		"command": result.Command,
-		"raw":     raw,
+		"command":     result.Command,
+		"raw":         raw,
+		"raw_meta":    rawMeta,
+		"total_lines": rawMeta.TotalLines,
+		"truncated":   rawMeta.Truncated,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	if len(result.Tags) > 0 {
 		payload["tags"] = result.Tags
 	}
@@ -1476,23 +1554,18 @@ func pprofFocusPathsTool(ctx context.Context, args map[string]any) (interface{},
 		return nil, err
 	}
 
-	raw := result.Raw
-	if maxLines := getInt(args, "max_lines", 0); maxLines > 0 {
-		trimmed, total, truncated := truncateLines(raw, maxLines)
-		raw = trimmed
-		payload := map[string]any{
-			"command":     result.Command,
-			"raw":         raw,
-			"total_lines": total,
-			"truncated":   truncated,
-		}
-		return marshalJSON(payload)
-	}
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
 
 	payload := map[string]any{
-		"command": result.Command,
-		"raw":     raw,
+		"command":     result.Command,
+		"raw":         raw,
+		"raw_meta":    rawMeta,
+		"total_lines": rawMeta.TotalLines,
+		"truncated":   rawMeta.Truncated,
 	}
+	addStderr(payload, result.Stderr, result.StderrMeta)
 	return marshalJSON(payload)
 }
 
@@ -1530,11 +1603,16 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 		return nil, err
 	}
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	table, tableMeta := applyTextLimits(datadog.FormatFunctionHistoryTable(result), nil, maxLines, maxBytes)
+
 	payload := map[string]any{
 		"command": fmt.Sprintf("profctl function-history --service %s --env %s --function %s",
 			result.Service, result.Env, result.Function),
-		"result": result,
-		"table":  datadog.FormatFunctionHistoryTable(result),
+		"result":     result,
+		"table":      table,
+		"table_meta": tableMeta,
 	}
 	summary := fmt.Sprintf("Function %s found in %d/%d profiles.", result.Function, result.Summary.FoundInProfiles, result.Summary.TotalProfiles)
 	return marshalJSONWithSummary(summary, payload)
@@ -1615,10 +1693,15 @@ func pprofGenerateReportTool(ctx context.Context, args map[string]any) (interfac
 		return nil, err
 	}
 
+	maxLines := getInt(args, "max_lines", 0)
+	maxBytes := getInt(args, "max_bytes", 0)
+	markdown, markdownMeta := applyTextLimits(result.Markdown, nil, maxLines, maxBytes)
+
 	payload := map[string]any{
 		"command": "pprof generate_report",
 		"result": map[string]any{
-			"markdown": result.Markdown,
+			"markdown":      markdown,
+			"markdown_meta": markdownMeta,
 		},
 	}
 	summary := fmt.Sprintf("Generated report with %d sections.", result.SectionCount)
