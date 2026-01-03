@@ -562,3 +562,113 @@ func datadogProfilesAggregateOutputSchema() map[string]any {
 		}, "handle", "profiles_merged", "time_range"),
 	}, "command", "result")
 }
+
+func pprofTemporalAnalysisOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "Command executed"),
+		"result": NewObjectSchema(map[string]any{
+			"inferred_settings": NewObjectSchema(map[string]any{
+				"max_concurrent_activity_task_pollers": prop("integer", "Inferred activity poller count"),
+				"max_concurrent_workflow_task_pollers": prop("integer", "Inferred workflow poller count"),
+				"active_activities":                    prop("integer", "Currently executing activities"),
+				"cached_workflows":                     prop("integer", "Cached workflow states"),
+				"active_local_activities":              prop("integer", "Currently executing local activities"),
+				"active_sessions":                      prop("integer", "Active sessions"),
+				"notes":                                arrayPropSchema(prop("string", "Note"), "Inference notes"),
+			}, "max_concurrent_activity_task_pollers", "max_concurrent_workflow_task_pollers"),
+			"counts": NewObjectSchema(map[string]any{
+				"activity_pollers_do_poll":    prop("integer", "Activity pollers in doPoll"),
+				"activity_pollers_in_grpc":    prop("integer", "Activity pollers in gRPC call"),
+				"workflow_pollers_do_poll":    prop("integer", "Workflow pollers in doPoll"),
+				"workflow_pollers_in_grpc":    prop("integer", "Workflow pollers in gRPC call"),
+				"local_activity_pollers":      prop("integer", "Local activity pollers"),
+				"activities_executing":        prop("integer", "Activities executing"),
+				"workflows_cached":            prop("integer", "Workflows cached"),
+				"local_activities_executing":  prop("integer", "Local activities executing"),
+				"sessions_active":             prop("integer", "Sessions active"),
+				"heartbeat_goroutines":        prop("integer", "Heartbeat goroutines"),
+				"grpc_streams":                prop("integer", "gRPC streams"),
+				"task_dispatchers":            prop("integer", "Task dispatchers"),
+				"eager_dispatchers":           prop("integer", "Eager dispatchers"),
+			}),
+			"workflow_breakdown": arrayPropSchema(NewObjectSchema(map[string]any{
+				"name":         prop("string", "Workflow name"),
+				"count":        prop("integer", "Count"),
+				"state":        prop("string", "State (selector, awaiting_future, executing)"),
+				"sample_stack": prop("string", "Sample stack"),
+			}, "name", "count", "state"), "Workflow type breakdown"),
+			"activity_breakdown": arrayPropSchema(NewObjectSchema(map[string]any{
+				"name":         prop("string", "Activity name"),
+				"count":        prop("integer", "Count"),
+				"sample_stack": prop("string", "Sample stack"),
+			}, "name", "count"), "Activity type breakdown"),
+			"task_queues":       arrayPropSchema(prop("string", "Task queue"), "Detected task queues"),
+			"total_goroutines":  prop("integer", "Total goroutines"),
+			"warnings":          arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "inferred_settings", "counts", "total_goroutines"),
+	}, "command", "result")
+}
+
+func pprofGoroutineCategorizeOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "Command executed"),
+		"result": NewObjectSchema(map[string]any{
+			"total_goroutines": prop("integer", "Total goroutines"),
+			"categories": arrayPropSchema(NewObjectSchema(map[string]any{
+				"name":         prop("string", "Category name"),
+				"pattern":      prop("string", "Regex pattern"),
+				"count":        prop("integer", "Goroutine count"),
+				"percent":      prop("number", "Percentage of total"),
+				"sample_stack": prop("string", "Sample stack"),
+			}, "name", "count", "percent"), "Categories with counts"),
+			"uncategorized": prop("integer", "Uncategorized goroutines"),
+			"top_uncategorized": arrayPropSchema(NewObjectSchema(map[string]any{
+				"signature": prop("string", "Stack signature"),
+				"count":     prop("integer", "Count"),
+			}, "signature", "count"), "Top uncategorized stacks"),
+			"presets_used": arrayPropSchema(prop("string", "Preset name"), "Presets used"),
+			"warnings":     arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "total_goroutines", "categories", "uncategorized"),
+	}, "command", "result")
+}
+
+func datadogMetricsAtTimestampOutputSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "Command executed"),
+		"result": NewObjectSchema(map[string]any{
+			"service":     prop("string", "Service name"),
+			"env":         prop("string", "Environment"),
+			"dd_site":     prop("string", "Datadog site"),
+			"center_time": prop("string", "Center timestamp"),
+			"from_time":   prop("string", "Window start time"),
+			"to_time":     prop("string", "Window end time"),
+			"pod_name":    prop("string", "Pod name filter"),
+			"metrics": arrayPropSchema(NewObjectSchema(map[string]any{
+				"name": prop("string", "Metric name"),
+				"tags": map[string]any{
+					"type":                 "object",
+					"description":          "Metric tags",
+					"additionalProperties": prop("string", "Tag value"),
+				},
+				"points": arrayPropSchema(NewObjectSchema(map[string]any{
+					"timestamp": prop("string", "Point timestamp"),
+					"value":     prop("number", "Value"),
+				}, "timestamp", "value"), "Data points"),
+				"unit":       prop("string", "Unit"),
+				"avg_value":  prop("number", "Average value"),
+				"max_value":  prop("number", "Maximum value"),
+				"min_value":  prop("number", "Minimum value"),
+				"last_value": prop("number", "Last value"),
+			}, "name", "points"), "Metric series"),
+			"summary": NewObjectSchema(map[string]any{
+				"go_goroutines":        prop("number", "Go goroutine count"),
+				"go_heap_inuse_bytes":  prop("number", "Go heap in-use bytes"),
+				"go_alloc_bytes":       prop("number", "Go alloc bytes"),
+				"go_gc_pause_ns":       prop("number", "Go GC pause time (ns)"),
+				"container_rss_mb":     prop("number", "Container RSS (MB)"),
+				"container_cpu_percent": prop("number", "Container CPU (%)"),
+			}),
+			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
+		}, "service", "center_time", "from_time", "to_time", "metrics", "summary"),
+	}, "command", "result")
+}

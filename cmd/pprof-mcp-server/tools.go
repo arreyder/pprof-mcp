@@ -1000,6 +1000,97 @@ func ToolSchemas() []ToolDefinition {
 			},
 			Handler: pprofDetectRepoTool,
 		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.temporal_analysis",
+				Description: `Analyze Temporal SDK worker configuration from goroutine profiles.
+
+**When to use**: To understand Temporal worker settings and activity/workflow execution state.
+
+**Infers**:
+- MaxConcurrentActivityTaskPollers (from active activity pollers)
+- MaxConcurrentWorkflowTaskPollers (from active workflow pollers)
+- Active activities and cached workflows
+- Local activity and session counts
+- Heartbeat goroutines
+
+**Workflow breakdown**: Groups workflows by type and state (selector, awaiting_future, executing).
+
+**Activity breakdown**: Groups activities by type.
+
+**Returns**: Inferred settings, raw counts, workflow/activity breakdowns.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+				}, "profile"),
+				OutputSchema: pprofTemporalAnalysisOutputSchema(),
+			},
+			Handler: pprofTemporalAnalysisTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "pprof.goroutine_categorize",
+				Description: `Categorize goroutines by configurable patterns or presets.
+
+**When to use**: To understand goroutine distribution by framework/subsystem.
+
+**Presets available**:
+- temporal: Temporal SDK pollers, executors, dispatchers
+- grpc: gRPC server handlers, client streams, http2
+- http: HTTP server/client connections
+- database: SQL, Postgres, MongoDB, Redis connections
+- runtime: GC, sysmon, netpoll, timers
+- sync: Mutexes, channels, selects
+- observability: Datadog, OpenTelemetry, Prometheus
+
+**Custom categories**: Provide regex patterns to match goroutine stacks.
+
+**Returns**: Counts per category with percentages, uncategorized stacks.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"profile": ProfilePath(),
+					"presets": arrayProp("string", "Preset category groups to include (temporal, grpc, http, database, runtime, sync, observability). If empty, uses all presets."),
+					"categories": map[string]any{
+						"type":                 "object",
+						"description":          "Custom categories as name -> regex pattern",
+						"additionalProperties": prop("string", "Regex pattern to match goroutine stacks"),
+					},
+				}, "profile"),
+				OutputSchema: pprofGoroutineCategorizeOutputSchema(),
+			},
+			Handler: pprofGoroutineCategorizeTool,
+		},
+		{
+			Tool: &mcp.Tool{
+				Name: "datadog.metrics_at_timestamp",
+				Description: `Query Datadog metrics around a specific timestamp.
+
+**When to use**: Correlate profile data with operational metrics at the same time.
+
+**Default metrics** (for Go services):
+- go.goroutines, go.memstats.heap_*, go.gc.*
+- container.memory.rss, container.cpu.usage
+- kubernetes.memory.rss, kubernetes.cpu.usage
+
+**Parameters**:
+- timestamp: RFC3339 format or Unix timestamp
+- window: Duration around timestamp (default: 5m)
+- metrics: Specific metrics to query (optional)
+- pod_name: Filter to specific pod (optional)
+
+**Returns**: Metric time series with min/max/avg/last values, summary of key Go metrics.`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"service":   prop("string", "The service name (required)"),
+					"env":       prop("string", "The environment (e.g., prod, staging)"),
+					"timestamp": prop("string", "Timestamp to query around (RFC3339 or Unix)"),
+					"window":    prop("string", "Time window around timestamp (e.g., '5m', '15m') (default: 5m)"),
+					"metrics":   arrayProp("string", "Specific metrics to query (optional, defaults to Go runtime metrics)"),
+					"pod_name":  prop("string", "Filter to specific pod (optional)"),
+					"site":      prop("string", "Datadog site (default: from DD_SITE env)"),
+					"dd_site":   prop("string", "Datadog site (alias for site)"),
+				}, "service"),
+				OutputSchema: datadogMetricsAtTimestampOutputSchema(),
+			},
+			Handler: datadogMetricsAtTimestampTool,
+		},
 	}
 	return tools
 }

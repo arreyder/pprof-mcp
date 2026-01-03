@@ -1842,6 +1842,121 @@ func parseReportInputs(args map[string]any) ([]pprof.ReportInput, error) {
 	return inputs, nil
 }
 
+// Temporal SDK analysis tool
+func pprofTemporalAnalysisTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	result, err := pprof.RunTemporalAnalysis(pprof.TemporalAnalysisParams{
+		Profile: getString(args, "profile"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof temporal_analysis",
+		"result":  result,
+	}
+
+	// Build summary
+	summary := fmt.Sprintf("Temporal SDK Analysis: %d goroutines, %d activity pollers, %d workflow pollers, %d cached workflows, %d active activities",
+		result.TotalGoroutines,
+		result.InferredSettings.MaxConcurrentActivityTaskPollers,
+		result.InferredSettings.MaxConcurrentWorkflowTaskPollers,
+		result.InferredSettings.CachedWorkflows,
+		result.InferredSettings.ActiveActivities)
+
+	return marshalJSONWithSummary(summary, payload)
+}
+
+// Goroutine categorization tool
+func pprofGoroutineCategorizeTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	// Parse categories
+	categories := make(map[string]string)
+	if categoriesArg, ok := args["categories"].(map[string]any); ok {
+		for name, pattern := range categoriesArg {
+			if patternStr, ok := pattern.(string); ok {
+				categories[name] = patternStr
+			}
+		}
+	}
+
+	// Parse presets
+	var presets []string
+	if presetsArg := args["presets"]; presetsArg != nil {
+		switch v := presetsArg.(type) {
+		case []interface{}:
+			for _, p := range v {
+				if ps, ok := p.(string); ok {
+					presets = append(presets, ps)
+				}
+			}
+		case []string:
+			presets = v
+		case string:
+			presets = []string{v}
+		}
+	}
+
+	result, err := pprof.RunGoroutineCategorize(pprof.GoroutineCategorizeParams{
+		Profile:    getString(args, "profile"),
+		Categories: categories,
+		Presets:    presets,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": "pprof goroutine_categorize",
+		"result":  result,
+	}
+
+	summary := fmt.Sprintf("Categorized %d goroutines into %d categories (%d uncategorized)",
+		result.TotalGoroutines, len(result.Categories), result.Uncategorized)
+
+	return marshalJSONWithSummary(summary, payload)
+}
+
+// Datadog metrics at timestamp tool
+func datadogMetricsAtTimestampTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	// Parse metrics list
+	var metrics []string
+	if metricsArg := args["metrics"]; metricsArg != nil {
+		switch v := metricsArg.(type) {
+		case []interface{}:
+			for _, m := range v {
+				if ms, ok := m.(string); ok {
+					metrics = append(metrics, ms)
+				}
+			}
+		case []string:
+			metrics = v
+		}
+	}
+
+	result, err := datadog.QueryMetricsAtTimestamp(ctx, datadog.MetricsAtTimestampParams{
+		Service:   getString(args, "service"),
+		Env:       getString(args, "env"),
+		Site:      firstNonEmpty(getString(args, "site"), getString(args, "dd_site")),
+		Timestamp: getString(args, "timestamp"),
+		Window:    getString(args, "window"),
+		Metrics:   metrics,
+		PodName:   getString(args, "pod_name"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("datadog metrics query service:%s env:%s at %s", result.Service, result.Env, result.CenterTime.Format(time.RFC3339)),
+		"result":  result,
+	}
+
+	summary := fmt.Sprintf("Fetched %d metrics for %s/%s around %s",
+		len(result.Metrics), result.Service, result.Env, result.CenterTime.Format(time.RFC3339))
+
+	return marshalJSONWithSummary(summary, payload)
+}
+
 func buildDownloadCommand(service, env, outDir string, hours int, site, profileID, eventID string) string {
 	base := fmt.Sprintf("profctl download --service %s --env %s --out %s --hours %d", service, env, outDir, hours)
 	if profileID != "" {

@@ -146,6 +146,7 @@ Or run from source:
 | `datadog.profiles.compare_range` | Compare profiles from two time ranges (before/after deployment) |
 | `datadog.profiles.near_event` | Find profiles around a specific event (OOM, restart, incident) |
 | `datadog.metrics.discover` | Discover available metrics for correlation (Go runtime, container) |
+| `datadog.metrics_at_timestamp` | Query metrics around a specific timestamp (correlate profiles with operational state) |
 | `datadog.function_history` | Track a function's CPU% across profiles over time |
 
 ### Local D2 Development
@@ -170,6 +171,8 @@ Or run from source:
 | `pprof.detect_repo` | Auto-detect local repository from profile function names |
 | `pprof.memory_sanity` | Detect RSS/heap mismatch patterns (SQLite, CGO, goroutines) |
 | `pprof.goroutine_analysis` | Detect goroutine leaks and blocking patterns |
+| `pprof.goroutine_categorize` | Categorize goroutines by framework/subsystem (presets: temporal, grpc, http, database, runtime, sync) |
+| `pprof.temporal_analysis` | Analyze Temporal SDK worker settings from goroutine profiles (pollers, cached workflows, activities) |
 | `pprof.contention_analysis` | Analyze mutex/block contention by lock site |
 | `pprof.cross_correlate` | Correlate hotspots across CPU/heap/mutex profiles |
 | `pprof.hotspot_summary` | Top hotspots across profile types in one call |
