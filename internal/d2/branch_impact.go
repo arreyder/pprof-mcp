@@ -375,7 +375,7 @@ func hasUncommittedChanges(ctx context.Context) (bool, error) {
 
 func gitStash(ctx context.Context) error {
 	timestamp := time.Now().Format("20060102-150405")
-	message := fmt.Sprintf("d2_profile_branch_impact auto-stash %s", timestamp)
+	message := fmt.Sprintf("pprof_branch_impact auto-stash %s", timestamp)
 	cmd := exec.CommandContext(ctx, "git", "stash", "push", "-m", message)
 	return cmd.Run()
 }

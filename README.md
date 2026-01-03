@@ -149,22 +149,14 @@ Or run from source:
 | `datadog.metrics_at_timestamp` | Query metrics around a specific timestamp (correlate profiles with operational state) |
 | `datadog.function_history` | Track a function's CPU% across profiles over time |
 
-### Local D2 Development
-
-> **Note:** These tools are currently specific to the internal c1/d2 development environment (Tilt-based, specific pod naming conventions, debug server on port 4421). They could be generalized for broader pprof use in the future.
-
-| Tool | Description |
-|------|-------------|
-| `d2.profiles.download` | Download profiles from local d2 services (uses kubectl + port-forward) |
-| `d2.profile_branch_impact` | Compare profiles between git branches (one-phase, immediate execution) |
-| `d2.profile_branch_impact.plan` | Create execution plan for branch comparison (two-phase, review first) |
-| `d2.profile_branch_impact.execute` | Execute a previously created branch impact plan |
-
 ### Profile Analysis
 
 | Tool | Description |
 |------|-------------|
 | `pprof.top` | Show top functions by CPU/memory (includes contextual hints) |
+| `pprof.branch_impact` | Compare profiles between git branches (one-phase, immediate execution) |
+| `pprof.branch_impact.plan` | Create execution plan for branch comparison (two-phase, review first) |
+| `pprof.branch_impact.execute` | Execute a previously created branch impact plan |
 | `pprof.peek` | Show callers and callees (use `sample_index=alloc_space` for heap) |
 | `pprof.list` | Line-level source annotation |
 | `pprof.trace_source` | Trace a hot function with source snippets and call chain context |

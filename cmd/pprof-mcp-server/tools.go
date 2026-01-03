@@ -111,7 +111,7 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
-				Name: "d2.profile_branch_impact",
+				Name: "pprof.branch_impact",
 				Description: `Compare profiles between git branches to measure performance impact of code changes.
 
 **When to use**: Measure the performance impact of a code change by comparing profiles before and after.
@@ -152,7 +152,7 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
-				Name: "d2.profile_branch_impact.plan",
+				Name: "pprof.branch_impact.plan",
 				Description: `Create an execution plan for branch impact profiling without executing it.
 
 **When to use**: Generate a plan to review before running a long-running profile comparison.
@@ -160,7 +160,7 @@ func ToolSchemas() []ToolDefinition {
 **Workflow**:
 1. Call this tool with your parameters
 2. Review the execution plan (steps, estimated time)
-3. Call d2.profile_branch_impact.execute with the plan ID to run it
+3. Call pprof.branch_impact.execute with the plan ID to run it
 
 **Returns**: Execution plan with unique ID, steps, and estimated duration.`,
 				InputSchema: NewObjectSchema(map[string]any{
@@ -178,16 +178,16 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
-				Name: "d2.profile_branch_impact.execute",
+				Name: "pprof.branch_impact.execute",
 				Description: `Execute a previously created branch impact profiling plan.
 
-**When to use**: After reviewing a plan created with d2.profile_branch_impact.plan.
+**When to use**: After reviewing a plan created with pprof.branch_impact.plan.
 
 **Important**: This will take several minutes to complete. You can walk away after approval.
 
 **Returns**: Profile handles for before/after, update method, and any warnings.`,
 				InputSchema: NewObjectSchema(map[string]any{
-					"plan_id": prop("string", "Plan ID from d2.profile_branch_impact.plan (required)"),
+					"plan_id": prop("string", "Plan ID from pprof.branch_impact.plan (required)"),
 				}, "plan_id"),
 				OutputSchema: d2BranchImpactOutputSchema(),
 			},
