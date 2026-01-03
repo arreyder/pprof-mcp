@@ -18,6 +18,7 @@ import (
 
 	"github.com/arreyder/pprof-mcp/internal/d2"
 	"github.com/arreyder/pprof-mcp/internal/datadog"
+	"github.com/arreyder/pprof-mcp/internal/incident"
 	"github.com/arreyder/pprof-mcp/internal/pprof"
 	"github.com/arreyder/pprof-mcp/internal/profiles"
 	"github.com/arreyder/pprof-mcp/internal/services"
@@ -151,7 +152,11 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 	if isD2 {
 		// D2 mode - use local kubectl download
 		service := getString(args, "service")
-		outDir := getString(args, "out_dir")
+		outDir, incidentID := incident.ResolveOutDir(getString(args, "out_dir"))
+		if outDir == "" {
+			return nil, fmt.Errorf("out_dir is required (no incident context active)")
+		}
+		_ = incidentID // Used in result payload below
 		seconds := getInt(args, "seconds", 30)
 
 		result, err := d2.DownloadProfiles(ctx, d2.DownloadParams{
@@ -201,6 +206,9 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 			"mode":    "d2",
 			"result":  resultPayload,
 		}
+		if incidentID != "" {
+			payload["incident_id"] = incidentID
+		}
 		return marshalJSON(payload)
 	}
 
@@ -210,7 +218,10 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 	if env == "" {
 		return nil, fmt.Errorf("env parameter required for Datadog mode (not in d2 environment)")
 	}
-	outDir := getString(args, "out_dir")
+	outDir, incidentID := incident.ResolveOutDir(getString(args, "out_dir"))
+	if outDir == "" {
+		return nil, fmt.Errorf("out_dir is required (no incident context active)")
+	}
 	hours := getInt(args, "hours", 72)
 	site := getString(args, "dd_site")
 	if site == "" {
@@ -260,13 +271,19 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 		"mode":    "datadog",
 		"result":  resultPayload,
 	}
+	if incidentID != "" {
+		payload["incident_id"] = incidentID
+	}
 	return marshalJSON(payload)
 }
 
 func downloadTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	service := getString(args, "service")
 	env := getString(args, "env")
-	outDir := getString(args, "out_dir")
+	outDir, incidentID := incident.ResolveOutDir(getString(args, "out_dir"))
+	if outDir == "" {
+		return nil, fmt.Errorf("out_dir is required (no incident context active)")
+	}
 	hours := getInt(args, "hours", 72)
 	site := getString(args, "dd_site")
 	if site == "" {
@@ -315,12 +332,18 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 		"command": buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID),
 		"result":  resultPayload,
 	}
+	if incidentID != "" {
+		payload["incident_id"] = incidentID
+	}
 	return marshalJSON(payload)
 }
 
 func d2DownloadTool(ctx context.Context, args map[string]any) (interface{}, error) {
 	service := getString(args, "service")
-	outDir := getString(args, "out_dir")
+	outDir, incidentID := incident.ResolveOutDir(getString(args, "out_dir"))
+	if outDir == "" {
+		return nil, fmt.Errorf("out_dir is required (no incident context active)")
+	}
 	seconds := getInt(args, "seconds", 30)
 
 	result, err := d2.DownloadProfiles(ctx, d2.DownloadParams{
@@ -368,6 +391,9 @@ func d2DownloadTool(ctx context.Context, args map[string]any) (interface{}, erro
 	payload := map[string]any{
 		"command": fmt.Sprintf("kubectl port-forward -n %s %s 4421:4421", result.Namespace, result.PodName),
 		"result":  resultPayload,
+	}
+	if incidentID != "" {
+		payload["incident_id"] = incidentID
 	}
 	return marshalJSON(payload)
 }
