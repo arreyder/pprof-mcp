@@ -253,16 +253,16 @@ func repoURLForPackage(pkg string) string {
 }
 
 func lookupLatestVersion(ctx context.Context, modulePath string) (string, error) {
-	stdout, stderr, err := runCommand(ctx, "go", "list", "-m", "-u", "-json", modulePath)
+	output, err := runCommand(ctx, "go", "list", "-m", "-u", "-json", modulePath)
 	if err != nil {
-		return "", fmt.Errorf("go list failed: %w (%s)", err, strings.TrimSpace(stderr))
+		return "", fmt.Errorf("go list failed: %w (%s)", err, strings.TrimSpace(output.Stderr))
 	}
 	var payload struct {
 		Latest *struct {
 			Version string `json:"Version"`
 		} `json:"Latest"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+	if err := json.Unmarshal([]byte(output.Stdout), &payload); err != nil {
 		return "", err
 	}
 	if payload.Latest == nil {

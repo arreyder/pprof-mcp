@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/arreyder/pprof-mcp/internal/pprofparse"
+	"github.com/arreyder/pprof-mcp/internal/textutil"
 )
 
 type TopParams struct {
@@ -19,11 +20,14 @@ type TopParams struct {
 }
 
 type TopResult struct {
-	Command string                `json:"command"`
-	Raw     string                `json:"raw"`
-	Rows    []pprofparse.TopRow   `json:"rows"`
-	Summary pprofparse.TopSummary `json:"summary"`
-	Hints   []string              `json:"hints,omitempty"` // Contextual hints based on profile type
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
+	Rows       []pprofparse.TopRow   `json:"rows"`
+	Summary    pprofparse.TopSummary `json:"summary"`
+	Hints      []string              `json:"hints,omitempty"` // Contextual hints based on profile type
 }
 
 type PeekParams struct {
@@ -34,8 +38,11 @@ type PeekParams struct {
 }
 
 type PeekResult struct {
-	Command string `json:"command"`
-	Raw     string `json:"raw"`
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
 }
 
 type ListParams struct {
@@ -48,8 +55,11 @@ type ListParams struct {
 }
 
 type ListResult struct {
-	Command string `json:"command"`
-	Raw     string `json:"raw"`
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
 }
 
 type TracesParams struct {
@@ -59,10 +69,13 @@ type TracesParams struct {
 }
 
 type TracesResult struct {
-	Command    string `json:"command"`
-	Raw        string `json:"raw"`
-	TotalLines int    `json:"total_lines"`
-	Truncated  bool   `json:"truncated"`
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	TotalLines int                   `json:"total_lines"`
+	Truncated  bool                  `json:"truncated"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
 }
 
 type DiffTopParams struct {
@@ -106,20 +119,23 @@ func RunTop(ctx context.Context, params TopParams) (TopResult, error) {
 	}
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return TopResult{}, noMatches
 		}
-		return TopResult{}, fmt.Errorf("pprof top failed: %w\n%s", err, stderr)
+		return TopResult{}, fmt.Errorf("pprof top failed: %w\n%s", err, output.Stderr)
 	}
 
-	report := pprofparse.ParseTop(stdout)
+	report := pprofparse.ParseTop(output.Stdout)
 	return TopResult{
-		Command: shellJoin(append([]string{"go"}, pprofArgs...)),
-		Raw:     stdout,
-		Rows:    report.Rows,
-		Summary: report.Summary,
+		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
+		Raw:        output.Stdout,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
+		Rows:       report.Rows,
+		Summary:    report.Summary,
 	}, nil
 }
 
@@ -134,17 +150,20 @@ func RunPeek(ctx context.Context, params PeekParams) (PeekResult, error) {
 	}
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return PeekResult{}, noMatches
 		}
-		return PeekResult{}, fmt.Errorf("pprof peek failed: %w\n%s", err, stderr)
+		return PeekResult{}, fmt.Errorf("pprof peek failed: %w\n%s", err, output.Stderr)
 	}
 
 	return PeekResult{
-		Command: shellJoin(append([]string{"go"}, pprofArgs...)),
-		Raw:     stdout,
+		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
+		Raw:        output.Stdout,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
 	}, nil
 }
 
@@ -175,17 +194,20 @@ func RunList(ctx context.Context, params ListParams) (ListResult, error) {
 
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return ListResult{}, noMatches
 		}
-		return ListResult{}, fmt.Errorf("pprof list failed: %w\n%s", err, stderr)
+		return ListResult{}, fmt.Errorf("pprof list failed: %w\n%s", err, output.Stderr)
 	}
 
 	return ListResult{
-		Command: shellJoin(append([]string{"go"}, pprofArgs...)),
-		Raw:     stdout,
+		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
+		Raw:        output.Stdout,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
 	}, nil
 }
 
@@ -201,12 +223,12 @@ func RunTracesHead(ctx context.Context, params TracesParams) (TracesResult, erro
 	pprofArgs := []string{"tool", "pprof", "-traces"}
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		return TracesResult{}, fmt.Errorf("pprof traces failed: %w\n%s", err, stderr)
+		return TracesResult{}, fmt.Errorf("pprof traces failed: %w\n%s", err, output.Stderr)
 	}
 
-	allLines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	allLines := strings.Split(strings.TrimSuffix(output.Stdout, "\n"), "\n")
 	truncated := false
 	if len(allLines) > lines {
 		allLines = allLines[:lines]
@@ -216,8 +238,11 @@ func RunTracesHead(ctx context.Context, params TracesParams) (TracesResult, erro
 	return TracesResult{
 		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
 		Raw:        strings.Join(allLines, "\n"),
-		TotalLines: len(strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")),
+		TotalLines: output.StdoutMeta.TotalLines,
 		Truncated:  truncated,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
 	}, nil
 }
 
@@ -283,9 +308,12 @@ type TagsParams struct {
 }
 
 type TagsResult struct {
-	Command string   `json:"command"`
-	Raw     string   `json:"raw"`
-	Tags    []string `json:"tags,omitempty"` // Available tag keys when no filter applied
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
+	Tags       []string              `json:"tags,omitempty"` // Available tag keys when no filter applied
 }
 
 func RunTags(ctx context.Context, params TagsParams) (TagsResult, error) {
@@ -322,22 +350,25 @@ func RunTags(ctx context.Context, params TagsParams) (TagsResult, error) {
 
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return TagsResult{}, noMatches
 		}
-		return TagsResult{}, fmt.Errorf("pprof tags failed: %w\n%s", err, stderr)
+		return TagsResult{}, fmt.Errorf("pprof tags failed: %w\n%s", err, output.Stderr)
 	}
 
 	result := TagsResult{
-		Command: shellJoin(append([]string{"go"}, pprofArgs...)),
-		Raw:     stdout,
+		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
+		Raw:        output.Stdout,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
 	}
 
 	// Parse tag keys if showing tags
 	if params.TagShow != "" || (params.TagFocus == "" && params.TagIgnore == "") {
-		result.Tags = parseTagKeys(stdout)
+		result.Tags = parseTagKeys(output.Stdout)
 	}
 
 	return result, nil
@@ -405,12 +436,12 @@ func RunFlamegraph(ctx context.Context, params FlamegraphParams) (FlamegraphResu
 
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	_, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return FlamegraphResult{}, noMatches
 		}
-		return FlamegraphResult{}, fmt.Errorf("pprof flamegraph failed: %w\n%s", err, stderr)
+		return FlamegraphResult{}, fmt.Errorf("pprof flamegraph failed: %w\n%s", err, output.Stderr)
 	}
 
 	return FlamegraphResult{
@@ -477,12 +508,12 @@ func RunCallgraph(ctx context.Context, params CallgraphParams) (CallgraphResult,
 
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	_, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return CallgraphResult{}, noMatches
 		}
-		return CallgraphResult{}, fmt.Errorf("pprof callgraph failed: %w\n%s", err, stderr)
+		return CallgraphResult{}, fmt.Errorf("pprof callgraph failed: %w\n%s", err, output.Stderr)
 	}
 
 	return CallgraphResult{
@@ -504,8 +535,11 @@ type FocusPathsParams struct {
 }
 
 type FocusPathsResult struct {
-	Command string `json:"command"`
-	Raw     string `json:"raw"`
+	Command    string                `json:"command"`
+	Raw        string                `json:"raw"`
+	RawMeta    textutil.TruncateMeta `json:"raw_meta,omitempty"`
+	Stderr     string                `json:"stderr,omitempty"`
+	StderrMeta textutil.TruncateMeta `json:"stderr_meta,omitempty"`
 }
 
 func RunFocusPaths(ctx context.Context, params FocusPathsParams) (FocusPathsResult, error) {
@@ -532,17 +566,20 @@ func RunFocusPaths(ctx context.Context, params FocusPathsParams) (FocusPathsResu
 
 	pprofArgs = append(pprofArgs, buildProfileArgs(params.Binary, params.Profile)...)
 
-	stdout, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		if noMatches := wrapNoMatches(err, stderr); noMatches != nil {
+		if noMatches := wrapNoMatches(err, output.Stderr); noMatches != nil {
 			return FocusPathsResult{}, noMatches
 		}
-		return FocusPathsResult{}, fmt.Errorf("pprof focus_paths failed: %w\n%s", err, stderr)
+		return FocusPathsResult{}, fmt.Errorf("pprof focus_paths failed: %w\n%s", err, output.Stderr)
 	}
 
 	return FocusPathsResult{
-		Command: shellJoin(append([]string{"go"}, pprofArgs...)),
-		Raw:     stdout,
+		Command:    shellJoin(append([]string{"go"}, pprofArgs...)),
+		Raw:        output.Stdout,
+		RawMeta:    output.StdoutMeta,
+		Stderr:     output.Stderr,
+		StderrMeta: output.StderrMeta,
 	}, nil
 }
 
@@ -578,9 +615,9 @@ func RunMerge(ctx context.Context, params MergeParams) (MergeResult, error) {
 	// Add all profile paths
 	pprofArgs = append(pprofArgs, params.Profiles...)
 
-	_, stderr, err := runCommand(ctx, "go", pprofArgs...)
+	output, err := runCommand(ctx, "go", pprofArgs...)
 	if err != nil {
-		return MergeResult{}, fmt.Errorf("pprof merge failed: %w\n%s", err, stderr)
+		return MergeResult{}, fmt.Errorf("pprof merge failed: %w\n%s", err, output.Stderr)
 	}
 
 	return MergeResult{
