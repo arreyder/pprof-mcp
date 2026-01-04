@@ -21,6 +21,7 @@ type TruncateMeta struct {
 	TotalBytes      int    `json:"total_bytes"`
 	Truncated       bool   `json:"truncated"`
 	TruncatedReason string `json:"truncated_reason,omitempty"`
+	Strategy        string `json:"strategy,omitempty"`
 }
 
 type TruncateResult struct {
@@ -32,15 +33,16 @@ const truncateMarker = "... (truncated) ..."
 
 func TruncateText(raw string, opts TruncateOptions) TruncateResult {
 	// Apply line/byte limits using the chosen strategy and return explicit metadata.
+	strategy := normalizeStrategy(opts.Strategy)
 	result := TruncateResult{
 		Text: raw,
 		Meta: TruncateMeta{
 			TotalLines: CountLines(raw),
 			TotalBytes: len(raw),
+			Strategy:   string(strategy),
 		},
 	}
 
-	strategy := normalizeStrategy(opts.Strategy)
 	trimmed := raw
 	reasons := []string{}
 

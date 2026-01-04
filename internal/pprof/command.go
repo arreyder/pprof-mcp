@@ -150,6 +150,7 @@ func (c *cappedBuffer) Meta() textutil.TruncateMeta {
 		TotalLines: lines,
 		TotalBytes: c.total,
 		Truncated:  c.truncated,
+		Strategy:   string(textutil.StrategyHead),
 	}
 	if meta.Truncated {
 		meta.TruncatedReason = "max_bytes"

@@ -6,11 +6,11 @@ import (
 	"github.com/arreyder/pprof-mcp/internal/textutil"
 )
 
-func applyTextLimits(raw string, baseMeta *textutil.TruncateMeta, maxLines, maxBytes int) (string, textutil.TruncateMeta) {
+func applyTextLimits(raw string, baseMeta *textutil.TruncateMeta, maxLines, maxBytes int, strategy string) (string, textutil.TruncateMeta) {
 	result := textutil.TruncateText(raw, textutil.TruncateOptions{
 		MaxLines: maxLines,
 		MaxBytes: maxBytes,
-		Strategy: textutil.StrategyHead,
+		Strategy: parseTruncateStrategy(strategy),
 	})
 	meta := result.Meta
 	if baseMeta != nil {
@@ -29,6 +29,11 @@ func mergeTruncateMeta(base, extra textutil.TruncateMeta) textutil.TruncateMeta 
 	}
 	merged.Truncated = base.Truncated || extra.Truncated
 	merged.TruncatedReason = mergeReasons(base.TruncatedReason, extra.TruncatedReason)
+	if extra.Strategy != "" {
+		merged.Strategy = extra.Strategy
+	} else if merged.Strategy == "" {
+		merged.Strategy = base.Strategy
+	}
 	if !merged.Truncated {
 		merged.TruncatedReason = ""
 	}
@@ -52,6 +57,17 @@ func mergeReasons(reasons ...string) string {
 		}
 	}
 	return strings.Join(ordered, ",")
+}
+
+func parseTruncateStrategy(raw string) textutil.TruncateStrategy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(textutil.StrategyTail):
+		return textutil.StrategyTail
+	case string(textutil.StrategyHeadTail):
+		return textutil.StrategyHeadTail
+	default:
+		return textutil.StrategyHead
+	}
 }
 
 func addStderr(payload map[string]any, stderr string, meta textutil.TruncateMeta) {

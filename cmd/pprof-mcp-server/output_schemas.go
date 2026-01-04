@@ -31,6 +31,7 @@ func truncationMetaSchema() map[string]any {
 		"total_bytes":      prop("integer", "Total number of bytes before truncation"),
 		"truncated":        prop("boolean", "Whether the output was truncated"),
 		"truncated_reason": prop("string", "Truncation reason (max_lines, max_bytes)"),
+		"strategy":         prop("string", "Truncation strategy (head, tail, head_tail)"),
 	}, "total_lines", "total_bytes", "truncated")
 }
 
@@ -248,6 +249,7 @@ func pprofGenerateReportOutputSchema() map[string]any {
 		"result": NewObjectSchema(map[string]any{
 			"markdown":      prop("string", "Markdown report"),
 			"markdown_meta": truncationMetaSchema(),
+			"raw_meta":      truncationMetaSchema(),
 		}, "markdown"),
 	}, "command", "result")
 }
@@ -267,6 +269,7 @@ func functionHistoryOutputSchema() map[string]any {
 		}, "service", "env", "function", "from_ts", "to_ts", "entries", "summary"),
 		"table":      prop("string", "Formatted table"),
 		"table_meta": truncationMetaSchema(),
+		"raw_meta":   truncationMetaSchema(),
 	}, "command", "result", "table")
 }
 
@@ -299,6 +302,7 @@ func compareRangeOutputSchema() map[string]any {
 		"result":         compareRangeResultSchema(),
 		"formatted":      prop("string", "Formatted comparison output"),
 		"formatted_meta": truncationMetaSchema(),
+		"raw_meta":       truncationMetaSchema(),
 	}, "command", "result", "formatted")
 }
 

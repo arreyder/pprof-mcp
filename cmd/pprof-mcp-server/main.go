@@ -619,7 +619,8 @@ func pprofTopTool(ctx context.Context, args map[string]any) (interface{}, error)
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":  result.Command,
@@ -678,7 +679,8 @@ func pprofPeekTool(ctx context.Context, args map[string]any) (interface{}, error
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":     result.Command,
@@ -706,7 +708,8 @@ func pprofListTool(ctx context.Context, args map[string]any) (interface{}, error
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":     result.Command,
@@ -743,7 +746,8 @@ func pprofTracesTool(ctx context.Context, args map[string]any) (interface{}, err
 		baseMeta.Truncated = true
 		baseMeta.TruncatedReason = mergeReasons(baseMeta.TruncatedReason, "max_lines")
 	}
-	raw, rawMeta := applyTextLimits(result.Raw, &baseMeta, 0, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &baseMeta, 0, maxBytes, truncateStrategy)
 	totalLines := rawMeta.TotalLines
 	if totalLines == 0 {
 		totalLines = result.TotalLines
@@ -785,7 +789,8 @@ func pprofDiffTool(ctx context.Context, args map[string]any) (interface{}, error
 	maxBytes := getInt(args, "max_bytes", 0)
 	if maxLines > 0 || maxBytes > 0 {
 		formatted := formatDiffTop(result.Deltas)
-		raw, rawMeta := applyTextLimits(formatted, nil, maxLines, maxBytes)
+		truncateStrategy := getString(args, "truncate_strategy")
+		raw, rawMeta := applyTextLimits(formatted, nil, maxLines, maxBytes, truncateStrategy)
 		payload["raw"] = raw
 		payload["raw_meta"] = rawMeta
 		payload["total_lines"] = rawMeta.TotalLines
@@ -896,6 +901,9 @@ func pprofStorylinesTool(ctx context.Context, args map[string]any) (interface{},
 		RepoRoot:     getString(args, "repo_root"),
 		TrimPath:     getString(args, "trim_path"),
 		SampleIndex:  getString(args, "sample_index"),
+		MaxLines:     getInt(args, "max_lines", 0),
+		MaxBytes:     getInt(args, "max_bytes", 0),
+		Strategy:     getString(args, "truncate_strategy"),
 	})
 	if err != nil {
 		return nil, err
@@ -1393,13 +1401,15 @@ func datadogMetricsDiscoverTool(ctx context.Context, args map[string]any) (inter
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	table, tableMeta := applyTextLimits(datadog.FormatMetricsTable(result.Metrics), nil, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	table, tableMeta := applyTextLimits(datadog.FormatMetricsTable(result.Metrics), nil, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":    fmt.Sprintf("profctl datadog metrics discover --service %s", getString(args, "service")),
 		"result":     result,
 		"table":      table,
 		"table_meta": tableMeta,
+		"raw_meta":   tableMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1422,13 +1432,15 @@ func datadogProfilesCompareRangeTool(ctx context.Context, args map[string]any) (
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	formatted, formattedMeta := applyTextLimits(datadog.FormatCompareResult(result), nil, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	formatted, formattedMeta := applyTextLimits(datadog.FormatCompareResult(result), nil, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":        "profctl datadog profiles compare_range",
 		"result":         result,
 		"formatted":      formatted,
 		"formatted_meta": formattedMeta,
+		"raw_meta":       formattedMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1448,13 +1460,15 @@ func datadogProfilesNearEventTool(ctx context.Context, args map[string]any) (int
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	formatted, formattedMeta := applyTextLimits(datadog.FormatNearEventResult(result), nil, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	formatted, formattedMeta := applyTextLimits(datadog.FormatNearEventResult(result), nil, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":        "profctl datadog profiles near_event",
 		"result":         result,
 		"formatted":      formatted,
 		"formatted_meta": formattedMeta,
+		"raw_meta":       formattedMeta,
 	}
 	return marshalJSON(payload)
 }
@@ -1476,7 +1490,8 @@ func pprofTagsTool(ctx context.Context, args map[string]any) (interface{}, error
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":     result.Command,
@@ -1556,7 +1571,8 @@ func pprofFocusPathsTool(ctx context.Context, args map[string]any) (interface{},
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	raw, rawMeta := applyTextLimits(result.Raw, &result.RawMeta, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command":     result.Command,
@@ -1605,7 +1621,8 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	table, tableMeta := applyTextLimits(datadog.FormatFunctionHistoryTable(result), nil, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	table, tableMeta := applyTextLimits(datadog.FormatFunctionHistoryTable(result), nil, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command": fmt.Sprintf("profctl function-history --service %s --env %s --function %s",
@@ -1613,6 +1630,7 @@ func functionHistoryTool(ctx context.Context, args map[string]any) (interface{},
 		"result":     result,
 		"table":      table,
 		"table_meta": tableMeta,
+		"raw_meta":   tableMeta,
 	}
 	summary := fmt.Sprintf("Function %s found in %d/%d profiles.", result.Function, result.Summary.FoundInProfiles, result.Summary.TotalProfiles)
 	return marshalJSONWithSummary(summary, payload)
@@ -1695,13 +1713,15 @@ func pprofGenerateReportTool(ctx context.Context, args map[string]any) (interfac
 
 	maxLines := getInt(args, "max_lines", 0)
 	maxBytes := getInt(args, "max_bytes", 0)
-	markdown, markdownMeta := applyTextLimits(result.Markdown, nil, maxLines, maxBytes)
+	truncateStrategy := getString(args, "truncate_strategy")
+	markdown, markdownMeta := applyTextLimits(result.Markdown, nil, maxLines, maxBytes, truncateStrategy)
 
 	payload := map[string]any{
 		"command": "pprof generate_report",
 		"result": map[string]any{
 			"markdown":      markdown,
 			"markdown_meta": markdownMeta,
+			"raw_meta":      markdownMeta,
 		},
 	}
 	summary := fmt.Sprintf("Generated report with %d sections.", result.SectionCount)

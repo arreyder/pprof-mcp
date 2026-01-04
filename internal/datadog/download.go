@@ -23,10 +23,13 @@ import (
 const defaultSite = "us3.datadoghq.com"
 
 const (
-	defaultMaxRetries   = 5
-	defaultRateLimitRPS = 5.0
-	defaultBaseBackoff  = 200 * time.Millisecond
-	defaultMaxBackoff   = 5 * time.Second
+	defaultMaxRetries     = 5
+	defaultRateLimitRPS   = 2.0
+	defaultRateLimitBurst = 4
+	defaultBaseBackoff    = 200 * time.Millisecond
+	defaultMaxBackoff     = 5 * time.Second
+	maxRetryAfter         = 60 * time.Second
+	maxRequestBodyBytes   = 1 << 20
 )
 
 var profileTypes = map[string]string{
@@ -193,6 +196,9 @@ func doRequest(ctx context.Context, method, url, apiKey, appKey string, payload 
 }
 
 func doRequestWithRetry(ctx context.Context, method, urlStr, apiKey, appKey string, body []byte, contentType string, timeout time.Duration) ([]byte, int, error) {
+	if len(body) > maxRequestBodyBytes {
+		return nil, 0, fmt.Errorf("datadog request body too large (%d bytes)", len(body))
+	}
 	attempts := maxRetries()
 	if attempts < 1 {
 		attempts = 1
@@ -261,9 +267,6 @@ func retryDelay(resp *http.Response, attempt int) time.Duration {
 	backoff := backoffDelay(attempt)
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); retryAfter > 0 {
-			if retryAfter < backoff {
-				return backoff
-			}
 			return retryAfter
 		}
 	}
@@ -292,16 +295,26 @@ func parseRetryAfter(raw string) time.Duration {
 		return 0
 	}
 	if seconds, err := strconv.Atoi(raw); err == nil {
-		return time.Duration(seconds) * time.Second
+		return capRetryAfter(time.Duration(seconds) * time.Second)
 	}
 	if parsed, err := http.ParseTime(raw); err == nil {
 		wait := time.Until(parsed)
 		if wait < 0 {
 			return 0
 		}
-		return wait
+		return capRetryAfter(wait)
 	}
 	return 0
+}
+
+func capRetryAfter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 0
+	}
+	if delay > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return delay
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) error {
@@ -327,36 +340,76 @@ func hostFromURL(raw string) string {
 }
 
 type hostRateLimiter struct {
-	mu          sync.Mutex
-	minInterval time.Duration
-	nextReady   map[string]time.Time
+	mu      sync.Mutex
+	rps     float64
+	burst   float64
+	buckets map[string]*rateBucket
 }
 
-func newHostRateLimiter(rps float64) *hostRateLimiter {
-	interval := time.Duration(0)
-	if rps > 0 {
-		interval = time.Duration(float64(time.Second) / rps)
+type rateBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+func newHostRateLimiter(rps float64, burst int) *hostRateLimiter {
+	if rps <= 0 || burst <= 0 {
+		return &hostRateLimiter{
+			rps:     0,
+			burst:   0,
+			buckets: map[string]*rateBucket{},
+		}
 	}
 	return &hostRateLimiter{
-		minInterval: interval,
-		nextReady:   map[string]time.Time{},
+		rps:     rps,
+		burst:   float64(burst),
+		buckets: map[string]*rateBucket{},
 	}
 }
 
 func (l *hostRateLimiter) Wait(ctx context.Context, host string) error {
-	if l == nil || l.minInterval <= 0 || host == "" {
+	if l == nil || l.rps <= 0 || l.burst <= 0 || host == "" {
 		return nil
 	}
-	now := time.Now()
-	l.mu.Lock()
-	next := l.nextReady[host]
-	if next.Before(now) {
-		next = now
+	for {
+		wait := l.reserve(host, time.Now())
+		if wait <= 0 {
+			return nil
+		}
+		if err := sleepWithContext(ctx, wait); err != nil {
+			return err
+		}
 	}
-	wait := next.Sub(now)
-	l.nextReady[host] = next.Add(l.minInterval)
-	l.mu.Unlock()
-	return sleepWithContext(ctx, wait)
+}
+
+func (l *hostRateLimiter) reserve(host string, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	bucket := l.buckets[host]
+	if bucket == nil {
+		bucket = &rateBucket{
+			tokens: l.burst,
+			last:   now,
+		}
+		l.buckets[host] = bucket
+	}
+	elapsed := now.Sub(bucket.last).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	bucket.tokens = minFloat64(l.burst, bucket.tokens+elapsed*l.rps)
+	bucket.last = now
+	if bucket.tokens >= 1 {
+		bucket.tokens -= 1
+		return 0
+	}
+	missing := 1 - bucket.tokens
+	if missing < 0 {
+		missing = 0
+	}
+	if l.rps <= 0 {
+		return 0
+	}
+	return time.Duration(missing / l.rps * float64(time.Second))
 }
 
 var (
@@ -366,13 +419,16 @@ var (
 
 func getRateLimiter() *hostRateLimiter {
 	rateLimiterOnce.Do(func() {
-		rateLimiter = newHostRateLimiter(rateLimitRPS())
+		rateLimiter = newHostRateLimiter(rateLimitRPS(), rateLimitBurst())
 	})
 	return rateLimiter
 }
 
 func rateLimitRPS() float64 {
-	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_RATE_LIMIT_RPS"))
+	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_RPS"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("PPROF_MCP_DD_RATE_LIMIT_RPS"))
+	}
 	if raw == "" {
 		return defaultRateLimitRPS
 	}
@@ -384,6 +440,25 @@ func rateLimitRPS() float64 {
 		return 0
 	}
 	return val
+}
+
+func rateLimitBurst() int {
+	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_BURST"))
+	if raw == "" {
+		return defaultRateLimitBurst
+	}
+	val, err := strconv.Atoi(raw)
+	if err != nil || val < 1 {
+		return defaultRateLimitBurst
+	}
+	return val
+}
+
+func minFloat64(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func maxRetries() int {

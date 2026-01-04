@@ -21,6 +21,9 @@ type StorylinesParams struct {
 	RepoRoot     string
 	TrimPath     string
 	SampleIndex  string // Optional: if empty, auto-detects based on profile type
+	MaxLines     int
+	MaxBytes     int
+	Strategy     string
 }
 
 type StorylinesResult struct {
@@ -169,11 +172,11 @@ func buildStoryline(ctx context.Context, row pprofparse.TopRow, prof *profile.Pr
 		warnings = append(warnings, "no app-owned frame found")
 	}
 
-	peekLeaf := runEvidencePeek(ctx, params.Profile, leaf, sampleIndex)
+	peekLeaf := runEvidencePeek(ctx, params.Profile, leaf, sampleIndex, params)
 	peekApp := EvidenceOutput{}
 	listApp := EvidenceOutput{}
 	if firstApp != "" {
-		peekApp = runEvidencePeek(ctx, params.Profile, firstApp, sampleIndex)
+		peekApp = runEvidencePeek(ctx, params.Profile, firstApp, sampleIndex, params)
 		if params.RepoRoot != "" {
 			listApp = runEvidenceList(ctx, params.Profile, firstApp, params)
 		}
@@ -284,12 +287,12 @@ func firstAppFrame(stack []string, prefixes []string) string {
 	return ""
 }
 
-func runEvidencePeek(ctx context.Context, profilePath, symbol, sampleIndex string) EvidenceOutput {
+func runEvidencePeek(ctx context.Context, profilePath, symbol, sampleIndex string, params StorylinesParams) EvidenceOutput {
 	result, err := RunPeek(ctx, PeekParams{Profile: profilePath, Regex: symbol, SampleIndex: sampleIndex})
 	if err != nil {
 		return EvidenceOutput{}
 	}
-	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta)
+	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta, params)
 	return EvidenceOutput{Command: result.Command, Raw: trimmed, RawMeta: meta, Truncated: meta.Truncated}
 }
 
@@ -303,14 +306,19 @@ func runEvidenceList(ctx context.Context, profilePath, symbol string, params Sto
 	if err != nil {
 		return EvidenceOutput{}
 	}
-	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta)
+	trimmed, meta := applyEvidenceTruncation(result.Raw, result.RawMeta, params)
 	return EvidenceOutput{Command: result.Command, Raw: trimmed, RawMeta: meta, Truncated: meta.Truncated}
 }
 
-func applyEvidenceTruncation(raw string, base textutil.TruncateMeta) (string, textutil.TruncateMeta) {
+func applyEvidenceTruncation(raw string, base textutil.TruncateMeta, params StorylinesParams) (string, textutil.TruncateMeta) {
+	maxBytes := params.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 4000
+	}
 	result := textutil.TruncateText(raw, textutil.TruncateOptions{
-		MaxBytes: 4000,
-		Strategy: textutil.StrategyHead,
+		MaxLines: params.MaxLines,
+		MaxBytes: maxBytes,
+		Strategy: parseStrategy(params.Strategy),
 	})
 	meta := mergeTruncateMeta(base, result.Meta)
 	return result.Text, meta
@@ -326,6 +334,11 @@ func mergeTruncateMeta(base, extra textutil.TruncateMeta) textutil.TruncateMeta 
 	}
 	merged.Truncated = base.Truncated || extra.Truncated
 	merged.TruncatedReason = mergeReasons(base.TruncatedReason, extra.TruncatedReason)
+	if extra.Strategy != "" {
+		merged.Strategy = extra.Strategy
+	} else if merged.Strategy == "" {
+		merged.Strategy = base.Strategy
+	}
 	if !merged.Truncated {
 		merged.TruncatedReason = ""
 	}
@@ -349,6 +362,17 @@ func mergeReasons(reasons ...string) string {
 		}
 	}
 	return strings.Join(ordered, ",")
+}
+
+func parseStrategy(raw string) textutil.TruncateStrategy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(textutil.StrategyTail):
+		return textutil.StrategyTail
+	case string(textutil.StrategyHeadTail):
+		return textutil.StrategyHeadTail
+	default:
+		return textutil.StrategyHead
+	}
 }
 
 func reverse(items []string) {
