@@ -25,6 +25,7 @@ type ProfileCandidate struct {
 	ProfileID     string             `json:"profile_id"`
 	EventID       string             `json:"event_id"`
 	Timestamp     string             `json:"timestamp"`
+	Version       string             `json:"version,omitempty"`
 	NumericFields map[string]float64 `json:"numeric_fields,omitempty"`
 }
 
@@ -189,6 +190,7 @@ func parseCandidates(resp map[string]any) ([]ProfileCandidate, error) {
 			ProfileID:     getStringNested(entry, "attributes", "profile-id"),
 			EventID:       getString(entry, "id"),
 			Timestamp:     getStringNested(entry, "attributes", "timestamp"),
+			Version:       extractVersion(entry),
 			NumericFields: extractNumericFields(entry),
 		}
 		// Fallback: check top-level for backwards compatibility
@@ -204,6 +206,38 @@ func parseCandidates(resp map[string]any) ([]ProfileCandidate, error) {
 		candidates = append(candidates, candidate)
 	}
 	return candidates, nil
+}
+
+// extractVersion extracts the version tag from a profile entry.
+// It checks multiple locations where version might be stored:
+// 1. attributes.version (direct field)
+// 2. attributes.tags (array of "key:value" strings)
+// 3. top-level version field
+func extractVersion(entry map[string]any) string {
+	// Try direct version field in attributes
+	if version := getStringNested(entry, "attributes", "version"); version != "" {
+		return version
+	}
+
+	// Try tags array in attributes (format: ["version:12345", "env:prod", ...])
+	if attrs, ok := entry["attributes"].(map[string]any); ok {
+		if tags, ok := attrs["tags"].([]any); ok {
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok {
+					if strings.HasPrefix(tagStr, "version:") {
+						return strings.TrimPrefix(tagStr, "version:")
+					}
+				}
+			}
+		}
+	}
+
+	// Try top-level version field
+	if version := getString(entry, "version"); version != "" {
+		return version
+	}
+
+	return ""
 }
 
 // usefulNumericFields defines the whitelist of fields worth extracting.
