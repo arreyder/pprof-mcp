@@ -1,45 +1,49 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/arreyder/pprof-mcp/internal/textutil"
+)
 
 func TestTruncateLinesNoLimit(t *testing.T) {
 	raw := "a\nb\n"
-	trimmed, total, truncated := truncateLines(raw, 0)
-	if trimmed != raw {
-		t.Fatalf("expected raw output, got %q", trimmed)
+	result := textutil.TruncateText(raw, textutil.TruncateOptions{MaxLines: 0})
+	if result.Text != raw {
+		t.Fatalf("expected raw output, got %q", result.Text)
 	}
-	if total != 2 {
-		t.Fatalf("expected total 2, got %d", total)
+	if result.Meta.TotalLines != 2 {
+		t.Fatalf("expected total 2, got %d", result.Meta.TotalLines)
 	}
-	if truncated {
+	if result.Meta.Truncated {
 		t.Fatalf("expected not truncated")
 	}
 }
 
 func TestTruncateLinesLimit(t *testing.T) {
 	raw := "a\nb\n"
-	trimmed, total, truncated := truncateLines(raw, 1)
-	if trimmed != "a" {
-		t.Fatalf("expected trimmed output 'a', got %q", trimmed)
+	result := textutil.TruncateText(raw, textutil.TruncateOptions{MaxLines: 1})
+	if result.Text != "a" {
+		t.Fatalf("expected trimmed output 'a', got %q", result.Text)
 	}
-	if total != 2 {
-		t.Fatalf("expected total 2, got %d", total)
+	if result.Meta.TotalLines != 2 {
+		t.Fatalf("expected total 2, got %d", result.Meta.TotalLines)
 	}
-	if !truncated {
+	if !result.Meta.Truncated {
 		t.Fatalf("expected truncated")
 	}
 }
 
 func TestTruncateLinesEmpty(t *testing.T) {
 	raw := ""
-	trimmed, total, truncated := truncateLines(raw, 3)
-	if trimmed != raw {
-		t.Fatalf("expected empty output, got %q", trimmed)
+	result := textutil.TruncateText(raw, textutil.TruncateOptions{MaxLines: 3})
+	if result.Text != raw {
+		t.Fatalf("expected empty output, got %q", result.Text)
 	}
-	if total != 0 {
-		t.Fatalf("expected total 0, got %d", total)
+	if result.Meta.TotalLines != 0 {
+		t.Fatalf("expected total 0, got %d", result.Meta.TotalLines)
 	}
-	if truncated {
+	if result.Meta.Truncated {
 		t.Fatalf("expected not truncated")
 	}
 }

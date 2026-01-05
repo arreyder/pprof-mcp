@@ -8,15 +8,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const defaultSite = "us3.datadoghq.com"
+
+const (
+	defaultMaxRetries     = 5
+	defaultRateLimitRPS   = 2.0
+	defaultRateLimitBurst = 4
+	defaultBaseBackoff    = 200 * time.Millisecond
+	defaultMaxBackoff     = 5 * time.Second
+	maxRetryAfter         = 60 * time.Second
+	maxRequestBodyBytes   = 1 << 20
+)
 
 var profileTypes = map[string]string{
 	"cpu.pprof":         "cpu",
@@ -26,13 +40,17 @@ var profileTypes = map[string]string{
 	"goroutines.pprof":  "goroutines",
 }
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 type DownloadParams struct {
-	Service string
-	Env     string
-	OutDir  string
-	Site    string
-	Hours   int
-	Now     time.Time
+	Service   string
+	Env       string
+	OutDir    string
+	Site      string
+	Hours     int
+	Now       time.Time
 	ProfileID string
 	EventID   string
 }
@@ -157,27 +175,16 @@ func doRequest(ctx context.Context, method, url, apiKey, appKey string, payload 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(bodyBytes))
+	respBody, status, err := doRequestWithRetry(ctx, method, url, apiKey, appKey, bodyBytes, "application/json", 60*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("DD-API-KEY", apiKey)
-	req.Header.Set("DD-APPLICATION-KEY", appKey)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("datadog list failed: status %d: %s", resp.StatusCode, string(body))
+	if status >= 300 {
+		return nil, fmt.Errorf("datadog list failed: status %d: %s", status, string(respBody))
 	}
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -186,6 +193,284 @@ func doRequest(ctx context.Context, method, url, apiKey, appKey string, payload 
 	}
 
 	return result, nil
+}
+
+func doRequestWithRetry(ctx context.Context, method, urlStr, apiKey, appKey string, body []byte, contentType string, timeout time.Duration) ([]byte, int, error) {
+	if len(body) > maxRequestBodyBytes {
+		return nil, 0, fmt.Errorf("datadog request body too large (%d bytes)", len(body))
+	}
+	attempts := maxRetries()
+	if attempts < 1 {
+		attempts = 1
+	}
+	client := &http.Client{Timeout: timeout}
+	host := hostFromURL(urlStr)
+	limiter := getRateLimiter()
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := limiter.Wait(ctx, host); err != nil {
+			return nil, 0, err
+		}
+		req, err := newRequest(ctx, method, urlStr, apiKey, appKey, body, contentType)
+		if err != nil {
+			return nil, 0, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, resp.StatusCode, readErr
+		}
+		if !shouldRetry(resp.StatusCode) {
+			return respBody, resp.StatusCode, nil
+		}
+		if attempt == attempts {
+			return respBody, resp.StatusCode, fmt.Errorf("datadog request failed: status %d: %s", resp.StatusCode, string(respBody))
+		}
+		wait := retryDelay(resp, attempt)
+		if err := sleepWithContext(ctx, wait); err != nil {
+			return nil, resp.StatusCode, err
+		}
+	}
+	return nil, 0, errors.New("datadog request failed")
+}
+
+func newRequest(ctx context.Context, method, urlStr, apiKey, appKey string, body []byte, contentType string) (*http.Request, error) {
+	var reader io.Reader
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, urlStr, reader)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if apiKey != "" {
+		req.Header.Set("DD-API-KEY", apiKey)
+	}
+	if appKey != "" {
+		req.Header.Set("DD-APPLICATION-KEY", appKey)
+	}
+	return req, nil
+}
+
+func shouldRetry(status int) bool {
+	return status == http.StatusTooManyRequests || status >= 500
+}
+
+func retryDelay(resp *http.Response, attempt int) time.Duration {
+	backoff := backoffDelay(attempt)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); retryAfter > 0 {
+			return retryAfter
+		}
+	}
+	return backoff
+}
+
+func backoffDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := defaultBaseBackoff * time.Duration(1<<uint(attempt-1))
+	if delay > defaultMaxBackoff {
+		delay = defaultMaxBackoff
+	}
+	jitterRange := delay / 4
+	if jitterRange <= 0 {
+		return delay
+	}
+	jitter := time.Duration(rand.Int63n(int64(jitterRange)))
+	return delay + jitter
+}
+
+func parseRetryAfter(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		return capRetryAfter(time.Duration(seconds) * time.Second)
+	}
+	if parsed, err := http.ParseTime(raw); err == nil {
+		wait := time.Until(parsed)
+		if wait < 0 {
+			return 0
+		}
+		return capRetryAfter(wait)
+	}
+	return 0
+}
+
+func capRetryAfter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 0
+	}
+	if delay > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return delay
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func hostFromURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+type hostRateLimiter struct {
+	mu      sync.Mutex
+	rps     float64
+	burst   float64
+	buckets map[string]*rateBucket
+}
+
+type rateBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+func newHostRateLimiter(rps float64, burst int) *hostRateLimiter {
+	if rps <= 0 || burst <= 0 {
+		return &hostRateLimiter{
+			rps:     0,
+			burst:   0,
+			buckets: map[string]*rateBucket{},
+		}
+	}
+	return &hostRateLimiter{
+		rps:     rps,
+		burst:   float64(burst),
+		buckets: map[string]*rateBucket{},
+	}
+}
+
+func (l *hostRateLimiter) Wait(ctx context.Context, host string) error {
+	if l == nil || l.rps <= 0 || l.burst <= 0 || host == "" {
+		return nil
+	}
+	for {
+		wait := l.reserve(host, time.Now())
+		if wait <= 0 {
+			return nil
+		}
+		if err := sleepWithContext(ctx, wait); err != nil {
+			return err
+		}
+	}
+}
+
+func (l *hostRateLimiter) reserve(host string, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	bucket := l.buckets[host]
+	if bucket == nil {
+		bucket = &rateBucket{
+			tokens: l.burst,
+			last:   now,
+		}
+		l.buckets[host] = bucket
+	}
+	elapsed := now.Sub(bucket.last).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	bucket.tokens = minFloat64(l.burst, bucket.tokens+elapsed*l.rps)
+	bucket.last = now
+	if bucket.tokens >= 1 {
+		bucket.tokens -= 1
+		return 0
+	}
+	missing := 1 - bucket.tokens
+	if missing < 0 {
+		missing = 0
+	}
+	if l.rps <= 0 {
+		return 0
+	}
+	return time.Duration(missing / l.rps * float64(time.Second))
+}
+
+var (
+	rateLimiterOnce sync.Once
+	rateLimiter     *hostRateLimiter
+)
+
+func getRateLimiter() *hostRateLimiter {
+	rateLimiterOnce.Do(func() {
+		rateLimiter = newHostRateLimiter(rateLimitRPS(), rateLimitBurst())
+	})
+	return rateLimiter
+}
+
+func rateLimitRPS() float64 {
+	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_RPS"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("PPROF_MCP_DD_RATE_LIMIT_RPS"))
+	}
+	if raw == "" {
+		return defaultRateLimitRPS
+	}
+	val, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return defaultRateLimitRPS
+	}
+	if val <= 0 {
+		return 0
+	}
+	return val
+}
+
+func rateLimitBurst() int {
+	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_BURST"))
+	if raw == "" {
+		return defaultRateLimitBurst
+	}
+	val, err := strconv.Atoi(raw)
+	if err != nil || val < 1 {
+		return defaultRateLimitBurst
+	}
+	return val
+}
+
+func minFloat64(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxRetries() int {
+	raw := strings.TrimSpace(os.Getenv("PPROF_MCP_DD_MAX_RETRIES"))
+	if raw == "" {
+		return defaultMaxRetries
+	}
+	val, err := strconv.Atoi(raw)
+	if err != nil || val < 1 {
+		return defaultMaxRetries
+	}
+	return val
 }
 
 func extractProfileMetadata(listResp map[string]any) (string, string, string, error) {
@@ -220,25 +505,14 @@ func extractProfileMetadata(listResp map[string]any) (string, string, string, er
 }
 
 func downloadZip(ctx context.Context, url, apiKey, appKey string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	respBody, status, err := doRequestWithRetry(ctx, http.MethodGet, url, apiKey, appKey, nil, "", 120*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("DD-API-KEY", apiKey)
-	req.Header.Set("DD-APPLICATION-KEY", appKey)
-
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("profile download failed: status %d: %s", status, string(respBody))
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("profile download failed: status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return io.ReadAll(resp.Body)
+	return respBody, nil
 }
 
 func extractProfiles(zipBytes []byte, service, env, outDir string) ([]ProfileFile, string, error) {

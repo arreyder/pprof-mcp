@@ -25,6 +25,16 @@ func profileFileSchema() map[string]any {
 	}, "type", "handle", "bytes")
 }
 
+func truncationMetaSchema() map[string]any {
+	return NewObjectSchema(map[string]any{
+		"total_lines":      prop("integer", "Total number of lines before truncation"),
+		"total_bytes":      prop("integer", "Total number of bytes before truncation"),
+		"truncated":        prop("boolean", "Whether the output was truncated"),
+		"truncated_reason": prop("string", "Truncation reason (max_lines, max_bytes)"),
+		"strategy":         prop("string", "Truncation strategy (head, tail, head_tail)"),
+	}, "total_lines", "total_bytes", "truncated")
+}
+
 func datadogProfilesListOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command": prop("string", "CLI command equivalent"),
@@ -121,25 +131,28 @@ func d2BranchImpactOutputSchema() map[string]any {
 
 func d2BranchImpactPlanOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
-		"id":               prop("string", "Unique plan ID for execution"),
-		"steps":            arrayPropSchema(prop("string", "Step"), "Execution steps"),
-		"estimated_time":   prop("string", "Estimated duration"),
-		"current_branch":   prop("string", "Current git branch"),
-		"has_uncommitted":  prop("boolean", "Whether there are uncommitted changes"),
-		"service":          prop("string", "Service to profile"),
-		"before_ref":       prop("string", "Baseline git ref"),
-		"after_ref":        prop("string", "Comparison git ref"),
+		"id":              prop("string", "Unique plan ID for execution"),
+		"steps":           arrayPropSchema(prop("string", "Step"), "Execution steps"),
+		"estimated_time":  prop("string", "Estimated duration"),
+		"current_branch":  prop("string", "Current git branch"),
+		"has_uncommitted": prop("boolean", "Whether there are uncommitted changes"),
+		"service":         prop("string", "Service to profile"),
+		"before_ref":      prop("string", "Baseline git ref"),
+		"after_ref":       prop("string", "Comparison git ref"),
 	}, "id", "steps", "estimated_time", "current_branch", "has_uncommitted", "service", "before_ref", "after_ref")
 }
 
 func pprofTopOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
-		"command":  prop("string", "pprof command"),
-		"raw":      prop("string", "Raw pprof output"),
-		"rows":     arrayPropSchema(pprofTopRowSchema(), "Top rows"),
-		"summary":  pprofTopSummarySchema(),
-		"hints":    arrayPropSchema(prop("string", "Hint"), "Contextual hints based on profile type"),
-		"baseline": baselineComparisonSchema(),
+		"command":     prop("string", "pprof command"),
+		"raw":         prop("string", "Raw pprof output"),
+		"raw_meta":    truncationMetaSchema(),
+		"stderr":      prop("string", "Command stderr (if any)"),
+		"stderr_meta": truncationMetaSchema(),
+		"rows":        arrayPropSchema(pprofTopRowSchema(), "Top rows"),
+		"summary":     pprofTopSummarySchema(),
+		"hints":       arrayPropSchema(prop("string", "Hint"), "Contextual hints based on profile type"),
+		"baseline":    baselineComparisonSchema(),
 	}, "command", "raw", "rows", "summary")
 }
 
@@ -234,7 +247,9 @@ func pprofGenerateReportOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
 		"command": prop("string", "pprof command"),
 		"result": NewObjectSchema(map[string]any{
-			"markdown": prop("string", "Markdown report"),
+			"markdown":      prop("string", "Markdown report"),
+			"markdown_meta": truncationMetaSchema(),
+			"raw_meta":      truncationMetaSchema(),
 		}, "markdown"),
 	}, "command", "result")
 }
@@ -252,7 +267,9 @@ func functionHistoryOutputSchema() map[string]any {
 			"summary":  functionHistorySummarySchema(),
 			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),
 		}, "service", "env", "function", "from_ts", "to_ts", "entries", "summary"),
-		"table": prop("string", "Formatted table"),
+		"table":      prop("string", "Formatted table"),
+		"table_meta": truncationMetaSchema(),
+		"raw_meta":   truncationMetaSchema(),
 	}, "command", "result", "table")
 }
 
@@ -281,9 +298,11 @@ func functionHistorySummarySchema() map[string]any {
 
 func compareRangeOutputSchema() map[string]any {
 	return NewObjectSchema(map[string]any{
-		"command":   prop("string", "CLI command equivalent"),
-		"result":    compareRangeResultSchema(),
-		"formatted": prop("string", "Formatted comparison output"),
+		"command":        prop("string", "CLI command equivalent"),
+		"result":         compareRangeResultSchema(),
+		"formatted":      prop("string", "Formatted comparison output"),
+		"formatted_meta": truncationMetaSchema(),
+		"raw_meta":       truncationMetaSchema(),
 	}, "command", "result", "formatted")
 }
 
@@ -577,19 +596,19 @@ func pprofTemporalAnalysisOutputSchema() map[string]any {
 				"notes":                                arrayPropSchema(prop("string", "Note"), "Inference notes"),
 			}, "max_concurrent_activity_task_pollers", "max_concurrent_workflow_task_pollers"),
 			"counts": NewObjectSchema(map[string]any{
-				"activity_pollers_do_poll":    prop("integer", "Activity pollers in doPoll"),
-				"activity_pollers_in_grpc":    prop("integer", "Activity pollers in gRPC call"),
-				"workflow_pollers_do_poll":    prop("integer", "Workflow pollers in doPoll"),
-				"workflow_pollers_in_grpc":    prop("integer", "Workflow pollers in gRPC call"),
-				"local_activity_pollers":      prop("integer", "Local activity pollers"),
-				"activities_executing":        prop("integer", "Activities executing"),
-				"workflows_cached":            prop("integer", "Workflows cached"),
-				"local_activities_executing":  prop("integer", "Local activities executing"),
-				"sessions_active":             prop("integer", "Sessions active"),
-				"heartbeat_goroutines":        prop("integer", "Heartbeat goroutines"),
-				"grpc_streams":                prop("integer", "gRPC streams"),
-				"task_dispatchers":            prop("integer", "Task dispatchers"),
-				"eager_dispatchers":           prop("integer", "Eager dispatchers"),
+				"activity_pollers_do_poll":   prop("integer", "Activity pollers in doPoll"),
+				"activity_pollers_in_grpc":   prop("integer", "Activity pollers in gRPC call"),
+				"workflow_pollers_do_poll":   prop("integer", "Workflow pollers in doPoll"),
+				"workflow_pollers_in_grpc":   prop("integer", "Workflow pollers in gRPC call"),
+				"local_activity_pollers":     prop("integer", "Local activity pollers"),
+				"activities_executing":       prop("integer", "Activities executing"),
+				"workflows_cached":           prop("integer", "Workflows cached"),
+				"local_activities_executing": prop("integer", "Local activities executing"),
+				"sessions_active":            prop("integer", "Sessions active"),
+				"heartbeat_goroutines":       prop("integer", "Heartbeat goroutines"),
+				"grpc_streams":               prop("integer", "gRPC streams"),
+				"task_dispatchers":           prop("integer", "Task dispatchers"),
+				"eager_dispatchers":          prop("integer", "Eager dispatchers"),
 			}),
 			"workflow_breakdown": arrayPropSchema(NewObjectSchema(map[string]any{
 				"name":         prop("string", "Workflow name"),
@@ -602,9 +621,9 @@ func pprofTemporalAnalysisOutputSchema() map[string]any {
 				"count":        prop("integer", "Count"),
 				"sample_stack": prop("string", "Sample stack"),
 			}, "name", "count"), "Activity type breakdown"),
-			"task_queues":       arrayPropSchema(prop("string", "Task queue"), "Detected task queues"),
-			"total_goroutines":  prop("integer", "Total goroutines"),
-			"warnings":          arrayPropSchema(prop("string", "Warning"), "Warnings"),
+			"task_queues":      arrayPropSchema(prop("string", "Task queue"), "Detected task queues"),
+			"total_goroutines": prop("integer", "Total goroutines"),
+			"warnings":         arrayPropSchema(prop("string", "Warning"), "Warnings"),
 		}, "inferred_settings", "counts", "total_goroutines"),
 	}, "command", "result")
 }
@@ -661,11 +680,11 @@ func datadogMetricsAtTimestampOutputSchema() map[string]any {
 				"last_value": prop("number", "Last value"),
 			}, "name", "points"), "Metric series"),
 			"summary": NewObjectSchema(map[string]any{
-				"go_goroutines":        prop("number", "Go goroutine count"),
-				"go_heap_inuse_bytes":  prop("number", "Go heap in-use bytes"),
-				"go_alloc_bytes":       prop("number", "Go alloc bytes"),
-				"go_gc_pause_ns":       prop("number", "Go GC pause time (ns)"),
-				"container_rss_mb":     prop("number", "Container RSS (MB)"),
+				"go_goroutines":         prop("number", "Go goroutine count"),
+				"go_heap_inuse_bytes":   prop("number", "Go heap in-use bytes"),
+				"go_alloc_bytes":        prop("number", "Go alloc bytes"),
+				"go_gc_pause_ns":        prop("number", "Go GC pause time (ns)"),
+				"container_rss_mb":      prop("number", "Container RSS (MB)"),
 				"container_cpu_percent": prop("number", "Container CPU (%)"),
 			}),
 			"warnings": arrayPropSchema(prop("string", "Warning"), "Warnings"),

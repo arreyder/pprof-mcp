@@ -1,29 +1,79 @@
 package main
 
-import "strings"
+import (
+	"strings"
 
-func truncateLines(raw string, maxLines int) (string, int, bool) {
-	if maxLines <= 0 {
-		return raw, countLines(raw), false
+	"github.com/arreyder/pprof-mcp/internal/textutil"
+)
+
+func applyTextLimits(raw string, baseMeta *textutil.TruncateMeta, maxLines, maxBytes int, strategy string) (string, textutil.TruncateMeta) {
+	result := textutil.TruncateText(raw, textutil.TruncateOptions{
+		MaxLines: maxLines,
+		MaxBytes: maxBytes,
+		Strategy: parseTruncateStrategy(strategy),
+	})
+	meta := result.Meta
+	if baseMeta != nil {
+		meta = mergeTruncateMeta(*baseMeta, result.Meta)
 	}
-	lines := splitLines(raw)
-	if len(lines) == 0 {
-		return raw, 0, false
-	}
-	if len(lines) <= maxLines {
-		return raw, len(lines), false
-	}
-	return strings.Join(lines[:maxLines], "\n"), len(lines), true
+	return result.Text, meta
 }
 
-func splitLines(raw string) []string {
-	trimmed := strings.TrimSuffix(raw, "\n")
-	if trimmed == "" {
-		return nil
+func mergeTruncateMeta(base, extra textutil.TruncateMeta) textutil.TruncateMeta {
+	merged := base
+	if merged.TotalBytes == 0 {
+		merged.TotalBytes = extra.TotalBytes
 	}
-	return strings.Split(trimmed, "\n")
+	if merged.TotalLines == 0 {
+		merged.TotalLines = extra.TotalLines
+	}
+	merged.Truncated = base.Truncated || extra.Truncated
+	merged.TruncatedReason = mergeReasons(base.TruncatedReason, extra.TruncatedReason)
+	if extra.Strategy != "" {
+		merged.Strategy = extra.Strategy
+	} else if merged.Strategy == "" {
+		merged.Strategy = base.Strategy
+	}
+	if !merged.Truncated {
+		merged.TruncatedReason = ""
+	}
+	return merged
 }
 
-func countLines(raw string) int {
-	return len(splitLines(raw))
+func mergeReasons(reasons ...string) string {
+	seen := map[string]struct{}{}
+	ordered := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		for _, item := range strings.Split(reason, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			ordered = append(ordered, item)
+		}
+	}
+	return strings.Join(ordered, ",")
+}
+
+func parseTruncateStrategy(raw string) textutil.TruncateStrategy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(textutil.StrategyTail):
+		return textutil.StrategyTail
+	case string(textutil.StrategyHeadTail):
+		return textutil.StrategyHeadTail
+	default:
+		return textutil.StrategyHead
+	}
+}
+
+func addStderr(payload map[string]any, stderr string, meta textutil.TruncateMeta) {
+	if strings.TrimSpace(stderr) == "" && !meta.Truncated {
+		return
+	}
+	payload["stderr"] = stderr
+	payload["stderr_meta"] = meta
 }

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/arreyder/pprof-mcp/internal/pprof"
@@ -15,6 +19,8 @@ import (
 const (
 	defaultBaselineFile = ".pprof-mcp-baselines.json"
 )
+
+var baselineStoreMu sync.Mutex
 
 type baselineStore struct {
 	UpdatedAt string                    `json:"updated_at"`
@@ -79,11 +85,11 @@ func loadBaselineStore(path string) (baselineStore, error) {
 		}
 		return store, err
 	}
-	if len(data) == 0 {
+	if len(bytes.TrimSpace(data)) == 0 {
 		return store, nil
 	}
 	if err := json.Unmarshal(data, &store); err != nil {
-		return store, err
+		return store, fmt.Errorf("baseline store at %q contains invalid JSON (partial write?): %w", path, err)
 	}
 	if store.Entries == nil {
 		store.Entries = map[string]*baselineEntry{}
@@ -106,7 +112,37 @@ func saveBaselineStore(path string, store baselineStore) error {
 			return err
 		}
 	}
-	return os.WriteFile(path, data, 0o644)
+	tempFile, err := os.CreateTemp(dir, ".pprof-mcp-baselines-")
+	if err != nil {
+		return err
+	}
+	tempName := tempFile.Name()
+	cleanup := func() {
+		_ = os.Remove(tempName)
+	}
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		cleanup()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		cleanup()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(tempName, 0o644); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return syncDir(filepath.Dir(path))
 }
 
 func buildBaselineKey(service, env, baselineKey, profileKind, sampleIndex string) string {
@@ -137,6 +173,9 @@ func compareAndUpdateBaseline(path, key, profileKind, sampleIndex string, rows [
 		Deviations:  []baselineDeviation{},
 		Warnings:    []string{},
 	}
+	baselineStoreMu.Lock()
+	defer baselineStoreMu.Unlock()
+
 	store, err := loadBaselineStore(path)
 	if err != nil {
 		return comparison, err
@@ -238,4 +277,22 @@ func absFloat(value float64) float64 {
 		return -value
 	}
 	return value
+}
+
+func syncDir(path string) error {
+	if path == "" || path == "." {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
