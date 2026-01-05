@@ -1275,6 +1275,14 @@ func datadogProfilesListTool(ctx context.Context, args map[string]any) (interfac
 		"command": fmt.Sprintf("profctl datadog profiles list --service %s --env %s", result.Service, result.Env),
 		"result":  result,
 	}
+
+	// Add hint when no profiles found to help with service name discovery
+	if len(result.Candidates) == 0 {
+		payload["hint"] = "No profiles found. Use datadog.services.search to find the correct service name."
+		payload["searched_service"] = result.Service
+		payload["searched_env"] = result.Env
+	}
+
 	summary := fmt.Sprintf("Found %d profiles for %s/%s from %s to %s.", len(result.Candidates), result.Service, result.Env, result.FromTS, result.ToTS)
 	return marshalJSONWithSummary(summary, payload)
 }
@@ -1386,6 +1394,76 @@ func repoServicesTool(ctx context.Context, args map[string]any) (interface{}, er
 		"services": items,
 	}
 	return marshalJSON(payload)
+}
+
+func datadogServicesSearchTool(ctx context.Context, args map[string]any) (interface{}, error) {
+	query := getString(args, "query")
+	env := getString(args, "env")
+	refresh := getBool(args, "refresh")
+	site := getString(args, "site")
+
+	var services []datadog.ServiceInfo
+	var cached bool
+	var cachedAt string
+
+	// Check cache first (unless refresh requested)
+	if !refresh {
+		if cachedServices, ok := datadog.GetCachedServices(env); ok {
+			services = cachedServices
+			cached = true
+			cachedAt = datadog.GetServicesCacheFetchedAt().Format(time.RFC3339)
+		}
+	}
+
+	// Fetch from Datadog if not cached
+	if len(services) == 0 {
+		result, err := datadog.ListServicesWithProfiling(ctx, datadog.ListServicesParams{
+			Env:     env,
+			Site:    site,
+			Minutes: 15, // Only look at recent profiles for speed
+		})
+		if err != nil {
+			return nil, err
+		}
+		services = result.Services
+		datadog.CacheServices(services)
+		cached = false
+		cachedAt = ""
+	}
+
+	// Filter by env prefix if specified and we got from cache (already filtered on fetch)
+	if env != "" && cached {
+		services = datadog.FilterServicesByEnvPrefix(services, env)
+	}
+
+	// Fuzzy match
+	matches := datadog.FuzzySearchServices(query, services)
+
+	// Limit to top 10 matches for readability
+	if len(matches) > 10 {
+		matches = matches[:10]
+	}
+
+	payload := map[string]any{
+		"command": fmt.Sprintf("datadog services search --query %q", query),
+		"result": map[string]any{
+			"query":     query,
+			"env":       env,
+			"matches":   matches,
+			"cached":    cached,
+			"total":     len(services),
+			"cached_at": cachedAt,
+		},
+	}
+
+	var summary string
+	if len(matches) == 0 {
+		summary = fmt.Sprintf("No services found matching %q. Found %d total services.", query, len(services))
+	} else {
+		summary = fmt.Sprintf("Found %d matching services for %q. Best match: %s (score: %.2f).", len(matches), query, matches[0].Service, matches[0].Score)
+	}
+
+	return marshalJSONWithSummary(summary, payload)
 }
 
 func datadogMetricsDiscoverTool(ctx context.Context, args map[string]any) (interface{}, error) {

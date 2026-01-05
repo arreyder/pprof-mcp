@@ -691,3 +691,24 @@ func datadogMetricsAtTimestampOutputSchema() map[string]any {
 		}, "service", "center_time", "from_time", "to_time", "metrics", "summary"),
 	}, "command", "result")
 }
+
+func datadogServicesSearchOutputSchema() map[string]any {
+	matchSchema := NewObjectSchema(map[string]any{
+		"service":      prop("string", "Service name"),
+		"environments": arrayPropSchema(prop("string", "Environment"), "Available environments"),
+		"score":        prop("number", "Match score (0-1, higher is better)"),
+		"match_type":   prop("string", "Match type (exact, normalized, prefix, contains, similar)"),
+	}, "service", "score", "match_type")
+
+	return NewObjectSchema(map[string]any{
+		"command": prop("string", "Command description"),
+		"result": NewObjectSchema(map[string]any{
+			"query":     prop("string", "Original search query"),
+			"env":       prop("string", "Environment filter used"),
+			"matches":   arrayPropSchema(matchSchema, "Matching services ranked by score"),
+			"cached":    prop("boolean", "Whether results came from cache"),
+			"total":     prop("integer", "Total number of services available"),
+			"cached_at": prop("string", "When the cache was populated (if cached)"),
+		}, "query", "matches"),
+	}, "command", "result")
+}

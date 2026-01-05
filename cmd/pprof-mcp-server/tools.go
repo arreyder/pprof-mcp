@@ -694,6 +694,39 @@ func ToolSchemas() []ToolDefinition {
 		},
 		{
 			Tool: &mcp.Tool{
+				Name: "datadog.services.search",
+				Description: `Search for Datadog services with profiling enabled using fuzzy matching.
+
+**When to use**: Use this tool FIRST when the user mentions a service by natural language name.
+Returns a list of matching services ranked by similarity.
+
+The LLM should use this to:
+1. Find the correct service name before calling other profile tools
+2. Suggest corrections when profile tools return "no profiles found"
+
+**Matching types**:
+- exact: Exact or case-insensitive match (score: 1.0-0.95)
+- normalized: Matches after removing -/_ (temporal_worker == temporal-worker) (score: 0.85)
+- prefix: Service name starts with query (score: 0.9)
+- contains: Query found within service name (score: 0.7)
+- similar: Fuzzy match allowing typos (score: 0.6 max)
+
+**Examples**:
+- Query "temporal worker" -> suggests "temporal_worker"
+- Query "rate limit" -> suggests "ratelimit", "be-ratelimit"
+- Query "innkeeper prod" -> suggests service "innkeeper" in env "prod-usw2"`,
+				InputSchema: NewObjectSchema(map[string]any{
+					"query":   prop("string", "Natural language service name (e.g., 'temporal worker', 'rate limiter')"),
+					"env":     prop("string", "Environment filter prefix (optional, e.g., 'prod' matches 'prod-usw2')"),
+					"refresh": prop("boolean", "Force refresh of cached service list (default: false)"),
+					"site":    prop("string", "Datadog site (default: from DD_SITE env)"),
+				}, "query"),
+				OutputSchema: datadogServicesSearchOutputSchema(),
+			},
+			Handler: datadogServicesSearchTool,
+		},
+		{
+			Tool: &mcp.Tool{
 				Name: "datadog.metrics.discover",
 				Description: `Discover available Datadog metrics that match a service filter.
 
