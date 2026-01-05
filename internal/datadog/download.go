@@ -64,6 +64,7 @@ type DownloadResult struct {
 	ProfileID   string        `json:"profile_id"`
 	EventID     string        `json:"event_id"`
 	Timestamp   string        `json:"timestamp"`
+	Version     string        `json:"version,omitempty"`
 	Files       []ProfileFile `json:"files"`
 	MetricsPath string        `json:"metrics_path,omitempty"`
 	Warnings    []string      `json:"warnings,omitempty"`
@@ -112,6 +113,7 @@ func DownloadLatestBundle(ctx context.Context, params DownloadParams) (DownloadR
 	timestamp := ""
 	resultWarnings := []string{}
 
+	version := ""
 	if profileID != "" || eventID != "" {
 		if profileID == "" || eventID == "" {
 			return DownloadResult{}, errors.New("profile_id and event_id must be provided together")
@@ -136,7 +138,7 @@ func DownloadLatestBundle(ctx context.Context, params DownloadParams) (DownloadR
 			return DownloadResult{}, err
 		}
 
-		profileID, eventID, timestamp, err = extractProfileMetadata(listResp)
+		profileID, eventID, timestamp, version, err = extractProfileMetadata(listResp)
 		if err != nil {
 			return DownloadResult{}, err
 		}
@@ -162,6 +164,7 @@ func DownloadLatestBundle(ctx context.Context, params DownloadParams) (DownloadR
 		ProfileID:   profileID,
 		EventID:     eventID,
 		Timestamp:   timestamp,
+		Version:     version,
 		Files:       files,
 		MetricsPath: metricsPath,
 		Warnings:    resultWarnings,
@@ -473,14 +476,14 @@ func maxRetries() int {
 	return val
 }
 
-func extractProfileMetadata(listResp map[string]any) (string, string, string, error) {
+func extractProfileMetadata(listResp map[string]any) (string, string, string, string, error) {
 	data, ok := listResp["data"].([]any)
 	if !ok || len(data) == 0 {
-		return "", "", "", errors.New("no profiles found")
+		return "", "", "", "", errors.New("no profiles found")
 	}
 	entry, ok := data[0].(map[string]any)
 	if !ok {
-		return "", "", "", errors.New("unexpected datadog response format")
+		return "", "", "", "", errors.New("unexpected datadog response format")
 	}
 
 	// profile-id is nested inside attributes
@@ -497,11 +500,14 @@ func extractProfileMetadata(listResp map[string]any) (string, string, string, er
 		timestamp = getString(entry, "timestamp")
 	}
 
+	// Extract version from the profile event
+	version := extractVersion(entry)
+
 	if profileID == "" || eventID == "" {
-		return "", "", "", errors.New("missing profile id or event id in response")
+		return "", "", "", "", errors.New("missing profile id or event id in response")
 	}
 
-	return profileID, eventID, timestamp, nil
+	return profileID, eventID, timestamp, version, nil
 }
 
 func downloadZip(ctx context.Context, url, apiKey, appKey string) ([]byte, error) {
