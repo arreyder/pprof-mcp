@@ -19,6 +19,7 @@ type ListProfilesParams struct {
 	Hours   int
 	Limit   int
 	Site    string
+	Host    string // Optional host filter (supports wildcards like *prod-usw2a*)
 }
 
 type ProfileCandidate struct {
@@ -32,6 +33,7 @@ type ProfileCandidate struct {
 type ListProfilesResult struct {
 	Service    string             `json:"service"`
 	Env        string             `json:"env"`
+	Host       string             `json:"host,omitempty"`
 	DDSite     string             `json:"dd_site"`
 	FromTS     string             `json:"from_ts"`
 	ToTS       string             `json:"to_ts"`
@@ -64,11 +66,16 @@ func ListProfiles(ctx context.Context, params ListProfilesParams) (ListProfilesR
 		return ListProfilesResult{}, err
 	}
 
+	query := fmt.Sprintf("service:%s env:%s", params.Service, params.Env)
+	if params.Host != "" {
+		query += fmt.Sprintf(" host:%s", params.Host)
+	}
+
 	payload := map[string]any{
 		"filter": map[string]any{
 			"from":  fromTS,
 			"to":    toTS,
-			"query": fmt.Sprintf("service:%s env:%s", params.Service, params.Env),
+			"query": query,
 		},
 		"sort": map[string]any{
 			"field": "timestamp",
@@ -90,6 +97,7 @@ func ListProfiles(ctx context.Context, params ListProfilesParams) (ListProfilesR
 	return ListProfilesResult{
 		Service:    params.Service,
 		Env:        params.Env,
+		Host:       params.Host,
 		DDSite:     site,
 		FromTS:     fromTS,
 		ToTS:       toTS,

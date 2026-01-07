@@ -229,6 +229,7 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 	}
 	profileID := getString(args, "profile_id")
 	eventID := getString(args, "event_id")
+	host := getString(args, "host")
 
 	result, err := datadog.DownloadLatestBundle(ctx, datadog.DownloadParams{
 		Service:   service,
@@ -238,6 +239,7 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 		Hours:     hours,
 		ProfileID: profileID,
 		EventID:   eventID,
+		Host:      host,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("datadog download failed: %w", err)
@@ -267,7 +269,7 @@ func profilesDownloadAutoTool(ctx context.Context, args map[string]any) (interfa
 	}
 
 	payload := map[string]any{
-		"command": fmt.Sprintf("%s (datadog mode)", buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID)),
+		"command": fmt.Sprintf("%s (datadog mode)", buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID, host)),
 		"mode":    "datadog",
 		"result":  resultPayload,
 	}
@@ -289,6 +291,7 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 	if site == "" {
 		site = getString(args, "site")
 	}
+	host := getString(args, "host")
 	profileID := getString(args, "profile_id")
 	eventID := getString(args, "event_id")
 
@@ -298,6 +301,7 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 		OutDir:    outDir,
 		Site:      site,
 		Hours:     hours,
+		Host:      host,
 		ProfileID: profileID,
 		EventID:   eventID,
 	})
@@ -329,7 +333,7 @@ func downloadTool(ctx context.Context, args map[string]any) (interface{}, error)
 	}
 
 	payload := map[string]any{
-		"command": buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID),
+		"command": buildDownloadCommand(service, env, outDir, hours, site, profileID, eventID, host),
 		"result":  resultPayload,
 	}
 	if incidentID != "" {
@@ -1266,6 +1270,7 @@ func datadogProfilesListTool(ctx context.Context, args map[string]any) (interfac
 		Hours:   getInt(args, "hours", 72),
 		Limit:   getInt(args, "limit", 50),
 		Site:    getString(args, "site"),
+		Host:    getString(args, "host"),
 	})
 	if err != nil {
 		return nil, err
@@ -1296,6 +1301,7 @@ func datadogProfilesPickTool(ctx context.Context, args map[string]any) (interfac
 		Hours:    getInt(args, "hours", 72),
 		Limit:    getInt(args, "limit", 50),
 		Site:     getString(args, "site"),
+		Host:     getString(args, "host"),
 		Strategy: datadog.PickStrategy(getString(args, "strategy")),
 		TargetTS: getString(args, "target_ts"),
 		Index:    getInt(args, "index", -1),
@@ -2164,7 +2170,7 @@ func datadogMetricsAtTimestampTool(ctx context.Context, args map[string]any) (in
 	return marshalJSONWithSummary(summary, payload)
 }
 
-func buildDownloadCommand(service, env, outDir string, hours int, site, profileID, eventID string) string {
+func buildDownloadCommand(service, env, outDir string, hours int, site, profileID, eventID, host string) string {
 	base := fmt.Sprintf("profctl download --service %s --env %s --out %s --hours %d", service, env, outDir, hours)
 	if profileID != "" {
 		base += " --profile_id " + profileID
@@ -2174,6 +2180,9 @@ func buildDownloadCommand(service, env, outDir string, hours int, site, profileI
 	}
 	if site != "" {
 		base += " --dd_site " + site
+	}
+	if host != "" {
+		base += " --host " + host
 	}
 	return base
 }
