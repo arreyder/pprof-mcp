@@ -53,6 +53,7 @@ type DownloadParams struct {
 	Now       time.Time
 	ProfileID string
 	EventID   string
+	Host      string // Optional host filter (supports wildcards)
 }
 
 type DownloadResult struct {
@@ -120,11 +121,15 @@ func DownloadLatestBundle(ctx context.Context, params DownloadParams) (DownloadR
 		}
 		resultWarnings = append(resultWarnings, "timestamp unavailable; profile selected explicitly")
 	} else {
+		query := fmt.Sprintf("service:%s env:%s", params.Service, params.Env)
+		if params.Host != "" {
+			query += fmt.Sprintf(" host:%s", params.Host)
+		}
 		listPayload := map[string]any{
 			"filter": map[string]any{
 				"from":  fromTS,
 				"to":    toTS,
-				"query": fmt.Sprintf("service:%s env:%s", params.Service, params.Env),
+				"query": query,
 			},
 			"sort": map[string]any{
 				"field": "timestamp",

@@ -5,6 +5,7 @@ func profileCandidateSchema() map[string]any {
 		"profile_id":     prop("string", "Datadog profile ID"),
 		"event_id":       prop("string", "Datadog event ID"),
 		"timestamp":      prop("string", "Profile timestamp (RFC3339)"),
+		"version":        prop("string", "Build version/tag from profile metadata"),
 		"numeric_fields": numericFieldsSchema(),
 	}, "profile_id", "event_id", "timestamp")
 }
@@ -41,6 +42,7 @@ func datadogProfilesListOutputSchema() map[string]any {
 		"result": NewObjectSchema(map[string]any{
 			"service":    prop("string", "Service name"),
 			"env":        prop("string", "Environment"),
+			"host":       prop("string", "Host filter used"),
 			"dd_site":    prop("string", "Datadog site"),
 			"from_ts":    prop("string", "Resolved start time"),
 			"to_ts":      prop("string", "Resolved end time"),

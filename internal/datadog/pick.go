@@ -26,6 +26,7 @@ type PickProfilesParams struct {
 	Hours     int
 	Limit     int
 	Site      string
+	Host      string // Optional host filter (supports wildcards)
 	Strategy  PickStrategy
 	TargetTS  string
 	Index     int
@@ -46,6 +47,7 @@ func PickProfile(ctx context.Context, params PickProfilesParams) (PickResult, er
 		Hours:   params.Hours,
 		Limit:   params.Limit,
 		Site:    params.Site,
+		Host:    params.Host,
 	})
 	if err != nil {
 		return PickResult{}, err
